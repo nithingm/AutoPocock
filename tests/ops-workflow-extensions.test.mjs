@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, stat, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -61,6 +61,34 @@ async function runOps(cwd, args) {
   }
 }
 
+function makeCompletionReport({ issue, changedAreas = "scripts/ops.mjs", results = "Passing" }) {
+  return `# Completion Report
+
+## Changes
+
+- Files or areas changed: ${changedAreas}
+
+## Verification
+
+- Commands run: node --test tests/ops-workflow-extensions.test.mjs
+- Results: ${results}
+- Gaps: None
+
+## Risks
+
+- Residual risks: None
+
+## Follow-ups
+
+- Bugs: None
+- Issues: None
+
+## Issue
+
+- Tracker: #${issue}
+`;
+}
+
 test("init creates the durable memory proposals directory", async () => {
   const cwd = await makeWorkspace();
 
@@ -91,6 +119,30 @@ test("review-prep fails with explicit gate messages when required inputs are mis
   assert.notEqual(result.code, 0);
   assert.match(result.stderr, /Missing Review Entry input: acceptance criteria\./);
   assert.match(result.stderr, /Missing Review Entry input: dependency changes\./);
+});
+
+test("complete writes explicit required and optional markers into the completion report template", async () => {
+  const cwd = await makeWorkspace();
+
+  const result = await runOps(cwd, ["complete", "--issue", "7", "--status", "needs human review"]);
+  const completionDir = path.join(cwd, "docs", "agents", "completions");
+  const createdFile = (await readdir(completionDir)).find((entry) => entry.endsWith(".md"));
+  const markdown = await readFile(path.join(completionDir, createdFile), "utf8");
+
+  assert.equal(result.code, 0);
+  assert.match(markdown, /- Status: needs human review/);
+  assert.match(markdown, /- Summary: REQUIRED - replace with a concise outcome summary/);
+  assert.match(markdown, /- Files or areas changed: REQUIRED - replace with explicit changed files or areas/);
+  assert.match(markdown, /- Reason: REQUIRED - replace with the reason for the change/);
+  assert.match(markdown, /- Commands run: REQUIRED - replace with exact verification commands/);
+  assert.match(markdown, /- Results: REQUIRED - replace with observed verification results/);
+  assert.match(markdown, /- Gaps: REQUIRED - replace with explicit remaining gaps, or write None/);
+  assert.match(markdown, /- Residual risks: REQUIRED - replace with explicit residual risks, or write None/);
+  assert.match(markdown, /- Bugs: OPTIONAL - link bugs found during implementation, or write None/);
+  assert.match(markdown, /- Issues: REQUIRED - replace with follow-up issues, or write None/);
+  assert.match(markdown, /- Updated: OPTIONAL - list updated artifacts, or write None/);
+  assert.match(markdown, /- Suggested stage: Human Review/);
+  assert.match(markdown, /- Tracker: 7/);
 });
 
 test("review-prep writes an advisory artifact when the gate passes", async () => {
@@ -150,6 +202,75 @@ test("review-prep writes an advisory artifact when the gate passes", async () =>
   assert.match(markdown, /- Issue: 6/);
   assert.match(markdown, /- PR: 456/);
   assert.match(markdown, /- Dependency changes:\n- None/);
+});
+
+test("review-prep auto-resolves the latest completion report for the requested issue", async () => {
+  const cwd = await makeWorkspace();
+  const completionDir = path.join(cwd, "docs", "agents", "completions");
+  const olderPath = path.join(completionDir, "2026-05-13-issue-6-older.md");
+  const newerPath = path.join(completionDir, "2026-05-14-issue-6-newer.md");
+  await writeFile(
+    olderPath,
+    makeCompletionReport({ issue: 6, changedAreas: "scripts/ops.mjs" }),
+  );
+  await writeFile(
+    newerPath,
+    makeCompletionReport({ issue: 6, changedAreas: "scripts/lib/review-gate.mjs" }),
+  );
+  await writeFile(
+    path.join(completionDir, "2026-05-14-issue-99.md"),
+    makeCompletionReport({ issue: 99, changedAreas: "scripts/ignore-me.mjs" }),
+  );
+  await utimes(olderPath, new Date("2026-05-13T12:00:00.000Z"), new Date("2026-05-13T12:00:00.000Z"));
+  await utimes(newerPath, new Date("2026-05-14T12:00:00.000Z"), new Date("2026-05-14T12:00:00.000Z"));
+
+  const result = await runOps(cwd, [
+    "review-prep",
+    "--issue",
+    "6",
+    "--acceptance",
+    "Generate review prep from the latest completion report",
+    "--dependency-changes",
+    "None",
+    "--local-refactors",
+    "None",
+  ]);
+
+  assert.equal(result.code, 0);
+  const reviewDir = path.join(cwd, "docs", "agents", "reviews");
+  const createdFile = (await readdir(reviewDir)).find((entry) => entry.endsWith(".md"));
+  const markdown = await readFile(path.join(reviewDir, createdFile), "utf8");
+
+  assert.match(markdown, /- Issue: 6/);
+  assert.match(markdown, /- Changed areas:\n- scripts\/lib\/review-gate\.mjs/);
+  assert.doesNotMatch(markdown, /scripts\/ops\.mjs/);
+  assert.doesNotMatch(markdown, /scripts\/ignore-me\.mjs/);
+});
+
+test("review-prep stops with exact completion choices when multiple latest reports match the issue", async () => {
+  const cwd = await makeWorkspace();
+  const completionDir = path.join(cwd, "docs", "agents", "completions");
+  const firstPath = path.join(completionDir, "2026-05-14-issue-6-a.md");
+  const secondPath = path.join(completionDir, "2026-05-14-issue-6-b.md");
+  const sharedTime = new Date("2026-05-14T12:00:00.000Z");
+
+  await writeFile(firstPath, makeCompletionReport({ issue: 6, changedAreas: "scripts/ops.mjs" }));
+  await writeFile(secondPath, makeCompletionReport({ issue: 6, changedAreas: "scripts/lib/review-gate.mjs" }));
+  await utimes(firstPath, sharedTime, sharedTime);
+  await utimes(secondPath, sharedTime, sharedTime);
+
+  const result = await runOps(cwd, ["review-prep", "--issue", "6"]);
+
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /Multiple completion artifacts match issue 6\./);
+  assert.match(result.stderr, new RegExp(firstPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(result.stderr, new RegExp(secondPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(
+    result.stderr,
+    new RegExp(
+      `pnpm ops review-prep -- --issue 6 --completion ${secondPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
+    ),
+  );
 });
 
 test("memory-propose writes json and markdown proposal artifacts", async () => {

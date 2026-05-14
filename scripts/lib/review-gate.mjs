@@ -1,4 +1,5 @@
-const PLACEHOLDER_PATTERN = /^(?:tbd|todo|n\/a|na|unknown|not provided)$/i;
+const PLACEHOLDER_PATTERN =
+  /^(?:(?:tbd|todo|n\/a|na|unknown|not provided)|(?:(?:required|optional)\s*-\s*(?:replace|link|list)\b.*))$/i;
 function normalizeText(value) {
   if (value == null) {
     return "";

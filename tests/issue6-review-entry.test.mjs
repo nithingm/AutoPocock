@@ -80,6 +80,63 @@ test("validateReviewEntryGate reports every missing review entry input explicitl
   ]);
 });
 
+test("validateReviewEntryGate treats hardened required placeholders as missing inputs", () => {
+  const result = validateReviewEntryGate({
+    completionReportMarkdown: `# Completion Report
+
+## Result
+
+- Status: REQUIRED - replace with explicit completion status
+- Summary: REQUIRED - replace with a concise outcome summary
+
+## Changes
+
+- Files or areas changed: REQUIRED - replace with explicit changed files or areas
+- Reason: REQUIRED - replace with the reason for the change
+
+## Verification
+
+- Commands run: REQUIRED - replace with exact verification commands
+- Results: REQUIRED - replace with observed verification results
+- Gaps: REQUIRED - replace with explicit remaining gaps, or write None
+
+## Risks
+
+- Residual risks: REQUIRED - replace with explicit residual risks, or write None
+
+## Follow-ups
+
+- Bugs: OPTIONAL - link bugs found during implementation, or write None
+- Issues: REQUIRED - replace with follow-up issues, or write None
+
+## Artifacts
+
+- Updated: OPTIONAL - list updated artifacts, or write None
+
+## Next Stage
+
+- Suggested stage: REQUIRED - replace with the next stage
+
+## Issue
+
+- Tracker: #7
+`,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.canGenerateReviewPrep, false);
+  assert.deepEqual(result.missingInputs, [
+    "acceptance criteria",
+    "changed areas",
+    "dependency changes",
+    "local refactors",
+    "verification",
+    "gaps",
+    "risks",
+    "follow-ups",
+  ]);
+});
+
 test("buildReviewPrep generates advisory markdown when the review entry gate passes", () => {
   const result = buildReviewPrep({
     issue: "#6",

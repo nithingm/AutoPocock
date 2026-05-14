@@ -1,8 +1,8 @@
 import { execFile } from "node:child_process";
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import { buildReviewPrep } from "./lib/review-gate.mjs";
+import { buildReviewPrep, parseCompletionReport } from "./lib/review-gate.mjs";
 import { createGitHubBootstrapReport } from "./lib/github-init.mjs";
 import { createMemoryProposal, writeMemoryProposalArtifact } from "./lib/memory-proposals.mjs";
 import { buildMirrorComment, renderMirrorPlan } from "./lib/artifact-mirror.mjs";
@@ -35,6 +35,7 @@ Usage:
   pnpm ops github:init
   pnpm ops github:export
   pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json
+  pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --prepare-worktree
 
 Guided Flow is the preferred UX. Manual Mode commands remain available as pnpm prd, pnpm issues, and pnpm qa.
 `;
@@ -75,6 +76,183 @@ function slugify(value) {
 function deriveWorktreePath(issue, title) {
   const base = `${slugify(issue)}-${slugify(title)}` || "dispatch";
   return path.join(cwd, ".worktrees", base);
+}
+
+function queueRecoveryMessage(queuePath) {
+  return `Queue file not found: ${queuePath}. Recover it with \`pnpm ops github:export -- --output ${queuePath}\` or seed Guided Flow with \`pnpm ops schedule -- --queue .ai/queue.example.json\`.`;
+}
+
+function dispatchRecoveryMessage(dispatchPath) {
+  return `Dispatch artifact not found: ${dispatchPath}. Generate Guided Flow dispatches with \`pnpm ops schedule -- --queue .ai/queue.json --dispatch\`.`;
+}
+
+function completionRecoveryMessage(completionPath, issue = "") {
+  const issueValue = issue || "<issue>";
+  return `Completion artifact not found: ${completionPath}. Generate it with \`pnpm ops complete -- --issue ${issueValue} --status "needs human review"\`.`;
+}
+
+function normalizeIssueRef(value) {
+  return String(value || "").trim().replace(/^#/, "");
+}
+
+function formatReviewPrepCommand(issue, completionPath = "") {
+  const base = `pnpm ops review-prep -- --issue ${issue}`;
+  return completionPath ? `${base} --completion ${completionPath}` : base;
+}
+
+function renderCompletionResolutionGuidance(resolution) {
+  if (resolution.kind === "ambiguous") {
+    return [
+      `Multiple completion artifacts match issue ${resolution.issue}.`,
+      "Candidates:",
+      ...resolution.candidates.map((candidate) => `- ${candidate}`),
+      "Re-run with one of:",
+      ...resolution.candidates.map((candidate) => formatReviewPrepCommand(resolution.issue, candidate)),
+    ].join("\n");
+  }
+
+  return [
+    `Completion artifact not found for issue ${resolution.issue}.`,
+    `Expected under: ${resolution.completionDir}`,
+    `Create one with: pnpm ops complete -- --issue ${resolution.issue} --status "needs human review"`,
+    `Then re-run with: ${formatReviewPrepCommand(resolution.issue, "<path-to-completion-report.md>")}`,
+  ].join("\n");
+}
+
+function removeOption(args, name) {
+  const result = [];
+
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === `--${name}`) {
+      index += 1;
+      continue;
+    }
+
+    result.push(args[index]);
+  }
+
+  return result;
+}
+
+function formatDispatchFollowUpCommand(command, args, dispatchPath) {
+  const remainingArgs = removeOption(removeOption(argsWithoutSeparator(args), "dispatch"), "issue");
+  const renderedArgs = ["--dispatch", dispatchPath, ...remainingArgs];
+  return `pnpm ops ${command} -- ${renderedArgs.join(" ")}`.trim();
+}
+
+function dispatchSelectionTimestamp(candidate, status) {
+  const value = status === "claimed" ? candidate.artifact?.claim?.claimed_at || candidate.artifact?.created_at : candidate.artifact?.created_at;
+  const timestamp = value ? new Date(value).getTime() : Number.NaN;
+  return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY;
+}
+
+async function listDispatchArtifacts() {
+  const dispatchDir = path.join(cwd, "docs", "agents", "dispatches");
+  let entries = [];
+
+  try {
+    entries = await readdir(dispatchDir);
+  } catch {
+    return [];
+  }
+
+  const artifacts = [];
+
+  for (const entry of entries.filter((value) => value.endsWith(".json")).sort()) {
+    const fullPath = path.join(dispatchDir, entry);
+
+    try {
+      artifacts.push({
+        fullPath,
+        artifact: JSON.parse(await readFile(fullPath, "utf8")),
+      });
+    } catch {
+      // Ignore invalid artifacts during lookup so one bad file does not block the rest.
+    }
+  }
+
+  return artifacts;
+}
+
+function renderDispatchResolutionGuidance({ command, args, status, issue = "", candidates }) {
+  const statusLabel = status === "claimed" ? "claimed" : "queued";
+
+  if (candidates.length === 0) {
+    if (issue) {
+      return `No ${statusLabel} dispatch found for issue ${issue}.`;
+    }
+
+    return status === "queued"
+      ? "No queued dispatch artifacts were found. Generate Guided Flow dispatches with `pnpm ops schedule -- --queue .ai/queue.json --dispatch`."
+      : "No claimed dispatch artifacts were found.";
+  }
+
+  const qualifier = issue ? ` for issue ${issue}` : "";
+  return [
+    `Ambiguous dispatch resolution for ${command}${qualifier}.`,
+    "Re-run with one of:",
+    ...candidates.map((candidate) => formatDispatchFollowUpCommand(command, args, candidate.fullPath)),
+  ].join("\n");
+}
+
+async function resolveDispatchArtifact(args, { command, status }) {
+  const dispatchPath = readOption(args, "dispatch");
+
+  if (dispatchPath) {
+    const fullPath = path.isAbsolute(dispatchPath) ? dispatchPath : path.join(cwd, dispatchPath);
+    if (!(await pathExists(fullPath))) {
+      throw new Error(dispatchRecoveryMessage(dispatchPath));
+    }
+
+    return {
+      fullPath,
+      artifact: JSON.parse(await readFile(fullPath, "utf8")),
+    };
+  }
+
+  const issue = readOption(args, "issue");
+  const issueRef = normalizeIssueRef(issue);
+  const allArtifacts = await listDispatchArtifacts();
+  const candidates = allArtifacts.filter(({ artifact }) => {
+    if (artifact?.status !== status) {
+      return false;
+    }
+
+    if (status === "claimed" && !artifact?.claim) {
+      return false;
+    }
+
+    if (!issueRef) {
+      return true;
+    }
+
+    return normalizeIssueRef(artifact?.issue_id) === issueRef;
+  });
+
+  if (issueRef) {
+    if (candidates.length === 1) {
+      return candidates[0];
+    }
+
+    throw new Error(renderDispatchResolutionGuidance({ command, args, status, issue, candidates }));
+  }
+
+  if (candidates.length === 0) {
+    throw new Error(renderDispatchResolutionGuidance({ command, args, status, candidates }));
+  }
+
+  const ranked = [...candidates].sort((left, right) => dispatchSelectionTimestamp(right, status) - dispatchSelectionTimestamp(left, status));
+  if (ranked.length === 1) {
+    return ranked[0];
+  }
+
+  const latestTimestamp = dispatchSelectionTimestamp(ranked[0], status);
+  const secondTimestamp = dispatchSelectionTimestamp(ranked[1], status);
+  if (latestTimestamp > secondTimestamp) {
+    return ranked[0];
+  }
+
+  throw new Error(renderDispatchResolutionGuidance({ command, args, status, candidates: ranked }));
 }
 
 async function runNodeScript(script, args) {
@@ -186,31 +364,31 @@ function completionMarkdown({ issue, status }) {
 ## Result
 
 - Status: ${status || "TBD"}
-- Summary:
+- Summary: REQUIRED - replace with a concise outcome summary
 
 ## Changes
 
-- Files or areas changed:
-- Reason:
+- Files or areas changed: REQUIRED - replace with explicit changed files or areas
+- Reason: REQUIRED - replace with the reason for the change
 
 ## Verification
 
-- Commands run:
-- Results:
-- Gaps:
+- Commands run: REQUIRED - replace with exact verification commands
+- Results: REQUIRED - replace with observed verification results
+- Gaps: REQUIRED - replace with explicit remaining gaps, or write None
 
 ## Risks
 
-- Residual risks:
+- Residual risks: REQUIRED - replace with explicit residual risks, or write None
 
 ## Follow-ups
 
-- Bugs:
-- Issues:
+- Bugs: OPTIONAL - link bugs found during implementation, or write None
+- Issues: REQUIRED - replace with follow-up issues, or write None
 
 ## Artifacts
 
-- Updated:
+- Updated: OPTIONAL - list updated artifacts, or write None
 
 ## Next Stage
 
@@ -347,7 +525,7 @@ async function findLatestFile(dir, needle) {
   let files = [];
 
   try {
-    files = await import("node:fs/promises").then(({ readdir }) => readdir(targetDir));
+    files = await readdir(targetDir);
   } catch {
     return "";
   }
@@ -358,6 +536,78 @@ async function findLatestFile(dir, needle) {
     .reverse()[0];
 
   return match ? path.join(targetDir, match) : "";
+}
+
+async function resolveCompletionReportFromIssue(issue) {
+  const normalizedIssue = normalizeIssueRef(issue);
+  const completionDir = path.join(cwd, "docs", "agents", "completions");
+  let files = [];
+
+  try {
+    files = await readdir(completionDir);
+  } catch {
+    return {
+      ok: false,
+      kind: "missing",
+      issue: normalizedIssue,
+      completionDir,
+      candidates: [],
+    };
+  }
+
+  const candidates = [];
+  for (const file of files) {
+    if (!file.endsWith(".md")) {
+      continue;
+    }
+
+    const target = path.join(completionDir, file);
+    const markdown = await readFile(target, "utf8");
+    const parsed = parseCompletionReport(markdown);
+    const trackerIssue = normalizeIssueRef(parsed.issue.tracker);
+    const filenameIssue = file.match(/(?:^|[^0-9])issue-(\d+)(?:[^0-9]|$)/i)?.[1] || "";
+
+    if (trackerIssue !== normalizedIssue && filenameIssue !== normalizedIssue) {
+      continue;
+    }
+
+    const fileStat = await stat(target);
+    candidates.push({
+      path: target,
+      mtimeMs: fileStat.mtimeMs,
+    });
+  }
+
+  if (candidates.length === 0) {
+    return {
+      ok: false,
+      kind: "missing",
+      issue: normalizedIssue,
+      completionDir,
+      candidates: [],
+    };
+  }
+
+  const latestMtimeMs = Math.max(...candidates.map((candidate) => candidate.mtimeMs));
+  const latestCandidates = candidates
+    .filter((candidate) => candidate.mtimeMs === latestMtimeMs)
+    .sort((left, right) => left.path.localeCompare(right.path));
+
+  if (latestCandidates.length !== 1) {
+    return {
+      ok: false,
+      kind: "ambiguous",
+      issue: normalizedIssue,
+      completionDir,
+      candidates: latestCandidates.map((candidate) => candidate.path),
+    };
+  }
+
+  return {
+    ok: true,
+    issue: normalizedIssue,
+    path: latestCandidates[0].path,
+  };
 }
 
 async function writeArtifact(kind, content, args) {
@@ -519,14 +769,64 @@ function fieldValue(fields, name) {
     return "";
   }
 
-  return field.value?.name || field.value || field.text || field.name || "";
+  if (Object.hasOwn(field, "value")) {
+    return normalizeProjectValue(field.value);
+  }
+
+  if (Object.hasOwn(field, "text")) {
+    return normalizeProjectValue(field.text);
+  }
+
+  if (Object.hasOwn(field, "name")) {
+    return normalizeProjectValue(field.name);
+  }
+
+  return "";
+}
+
+function normalizeProjectValue(value) {
+  if (value == null) {
+    return "";
+  }
+
+  if (typeof value === "object") {
+    if (Object.hasOwn(value, "name")) {
+      return normalizeProjectValue(value.name);
+    }
+
+    return "";
+  }
+
+  return String(value);
+}
+
+function flatItemValue(item, name) {
+  if (!item || typeof item !== "object") {
+    return "";
+  }
+
+  const normalizedTarget = name.toLowerCase();
+  for (const [key, value] of Object.entries(item)) {
+    if (key.toLowerCase() !== normalizedTarget) {
+      continue;
+    }
+
+    if (Array.isArray(value)) {
+      return value.join("|");
+    }
+
+    return normalizeProjectValue(value);
+  }
+
+  return "";
 }
 
 function normalizeProjectItem(item) {
   const content = item.content || {};
-  const labels = content.labels?.map((label) => label.name || label).filter(Boolean) || [];
+  const rawLabels = item.labels || content.labels || [];
+  const labels = rawLabels.map((label) => label.name || label).filter(Boolean);
   const fields = item.fieldValues || item.fields || [];
-  const stage = fieldValue(fields, "Execution Stage");
+  const stage = fieldValue(fields, "Execution Stage") || flatItemValue(item, "execution Stage");
 
   return {
     id: content.number ? `#${content.number}` : item.id || "",
@@ -534,13 +834,13 @@ function normalizeProjectItem(item) {
     title: content.title || item.title || "",
     labels,
     stage,
-    lane: fieldValue(fields, "Execution Lane"),
-    featureTrack: fieldValue(fields, "Feature Track"),
-    queueClass: fieldValue(fields, "Queue Class"),
-    risk: fieldValue(fields, "Risk"),
-    dependency: fieldValue(fields, "Dependency"),
-    conflictSurface: fieldValue(fields, "Conflict Surface"),
-    dispatchId: fieldValue(fields, "Dispatch ID"),
+    lane: fieldValue(fields, "Execution Lane") || flatItemValue(item, "execution Lane"),
+    featureTrack: fieldValue(fields, "Feature Track") || flatItemValue(item, "feature Track"),
+    queueClass: fieldValue(fields, "Queue Class") || flatItemValue(item, "queue Class"),
+    risk: fieldValue(fields, "Risk") || flatItemValue(item, "risk"),
+    dependency: fieldValue(fields, "Dependency") || flatItemValue(item, "dependency"),
+    conflictSurface: fieldValue(fields, "Conflict Surface") || flatItemValue(item, "conflict Surface"),
+    dispatchId: fieldValue(fields, "Dispatch ID") || flatItemValue(item, "dispatch ID"),
     prLinks: content.pullRequest?.url ? [content.pullRequest.url] : [],
     updatedAt: content.updatedAt || item.updatedAt || "",
     tracerBulletDone: false,
@@ -554,7 +854,7 @@ async function gitHubExport(args) {
   const output = readOption(args, "output", config.queueFile || ".ai/queue.json");
 
   if (!hasProjectReference(project) && !input) {
-    throw new Error("GitHub project reference is required. Set github.projectNumber, github.projectId, or github.projectUrl in .ai/ops.config.json, or pass --project-number/--project-id/--project-url.");
+    throw new Error("GitHub project reference is required. Set github.projectUrl, github.projectId, or github.projectNumber in .ai/ops.config.json, or pass --project-url/--project-id/--project-number.");
   }
 
   let rawItems = [];
@@ -565,7 +865,9 @@ async function gitHubExport(args) {
   } else {
     const ghVersion = await commandAvailable("gh");
     if (!ghVersion.available) {
-      throw new Error("gh CLI is required for github:export. Install it from https://cli.github.com/ or pass --input for a local export fixture.");
+      throw new Error(
+        "gh CLI is required for github:export. Immediate recovery: rerun with --input <path-to-project-items.json> to use a local export fixture. Permanent fix: install gh from https://cli.github.com/ and run `gh auth login`.",
+      );
     }
 
     if (!project.owner) {
@@ -622,6 +924,12 @@ function hasLabel(item, label) {
   return Array.isArray(item.labels) && item.labels.includes(label);
 }
 
+function hasCanonicalReadyForAgentLabel(config) {
+  const stateLabels = Array.isArray(config?.labels?.state) ? config.labels.state : [];
+  const categoryLabels = Array.isArray(config?.labels?.category) ? config.labels.category : [];
+  return [...stateLabels, ...categoryLabels].includes("ready-for-agent");
+}
+
 function riskCost(risk, defaults) {
   const cost = defaults.riskCost?.[risk || "low"] ?? 1;
   return cost === "approval-required" ? Infinity : cost;
@@ -631,7 +939,17 @@ function evaluateQueueItem(item, context) {
   const defaults = context.config.schedulerDefaults || {};
 
   if (!hasLabel(item, "ready-for-agent")) {
-    return { action: "skip", reason: "missing ready-for-agent label" };
+    if (!hasCanonicalReadyForAgentLabel(context.config)) {
+      return {
+        action: "skip",
+        reason: "repo config is missing the canonical ready-for-agent label; add it under labels.state and create the matching GitHub label before dispatching",
+      };
+    }
+
+    return {
+      action: "skip",
+      reason: "issue is missing the ready-for-agent label; add it to the GitHub issue to make the slice dispatchable",
+    };
   }
 
   if (item.stage !== "Ready for Handoff") {
@@ -671,7 +989,7 @@ async function schedule(args) {
   const queueFullPath = path.isAbsolute(queuePath) ? queuePath : path.join(cwd, queuePath);
 
   if (!(await pathExists(queueFullPath))) {
-    throw new Error(`Queue file not found: ${queuePath}. Start with .ai/queue.example.json or export GitHub issues into .ai/queue.json.`);
+    throw new Error(queueRecoveryMessage(queuePath));
   }
 
   const queue = await loadJson(queuePath);
@@ -868,24 +1186,18 @@ async function dispatch(args) {
 }
 
 async function claim(args) {
-  const dispatchPath = readOption(args, "dispatch");
   const claimedBy = readOption(args, "claimed-by");
   const requestedIsolationMode = readOption(args, "isolation-mode", "");
   const requestedWorktreePath = readOption(args, "worktree-path");
-
-  if (!dispatchPath) {
-    throw new Error("Claim requires --dispatch.");
-  }
 
   if (!claimedBy) {
     throw new Error("Claim requires --claimed-by.");
   }
 
-  const fullPath = path.isAbsolute(dispatchPath) ? dispatchPath : path.join(cwd, dispatchPath);
-  const artifact = JSON.parse(await readFile(fullPath, "utf8"));
+  const { fullPath, artifact } = await resolveDispatchArtifact(args, { command: "claim", status: "queued" });
 
   if (artifact.status !== "queued") {
-    throw new Error(`Dispatch ${artifact.dispatch_id || dispatchPath} is ${artifact.status}, not queued.`);
+    throw new Error(`Dispatch ${artifact.dispatch_id || fullPath} is ${artifact.status}, not queued.`);
   }
 
   const isolationMode = requestedIsolationMode || artifact.isolation_mode || "branch";
@@ -919,15 +1231,8 @@ async function claim(args) {
 }
 
 async function claimStatus(args) {
-  const dispatchPath = readOption(args, "dispatch");
   const maxAgeHours = Number.parseFloat(readOption(args, "max-age-hours", "24"));
-
-  if (!dispatchPath) {
-    throw new Error("Claim status requires --dispatch.");
-  }
-
-  const fullPath = path.isAbsolute(dispatchPath) ? dispatchPath : path.join(cwd, dispatchPath);
-  const artifact = JSON.parse(await readFile(fullPath, "utf8"));
+  const { fullPath, artifact } = await resolveDispatchArtifact(args, { command: "claim-status", status: "claimed" });
   const inspection = inspectClaimAge(artifact, Number.isFinite(maxAgeHours) ? maxAgeHours : 24);
 
   const lines = [
@@ -951,14 +1256,9 @@ async function claimStatus(args) {
 }
 
 async function reclaim(args) {
-  const dispatchPath = readOption(args, "dispatch");
   const approvedBy = readOption(args, "approved-by");
   const reason = readOption(args, "reason");
   const maxAgeHours = Number.parseFloat(readOption(args, "max-age-hours", "24"));
-
-  if (!dispatchPath) {
-    throw new Error("Reclaim requires --dispatch.");
-  }
 
   if (!approvedBy) {
     throw new Error("Reclaim requires --approved-by.");
@@ -968,11 +1268,10 @@ async function reclaim(args) {
     throw new Error("Reclaim requires --reason.");
   }
 
-  const fullPath = path.isAbsolute(dispatchPath) ? dispatchPath : path.join(cwd, dispatchPath);
-  const artifact = JSON.parse(await readFile(fullPath, "utf8"));
+  const { fullPath, artifact } = await resolveDispatchArtifact(args, { command: "reclaim", status: "claimed" });
 
   if (artifact.status !== "claimed" || !artifact.claim) {
-    throw new Error(`Dispatch ${artifact.dispatch_id || dispatchPath} is ${artifact.status}, not claimed.`);
+    throw new Error(`Dispatch ${artifact.dispatch_id || fullPath} is ${artifact.status}, not claimed.`);
   }
 
   const inspection = inspectClaimAge(artifact, Number.isFinite(maxAgeHours) ? maxAgeHours : 24);
@@ -996,17 +1295,11 @@ async function reclaim(args) {
 }
 
 async function runDispatch(args) {
-  const dispatchPath = readOption(args, "dispatch");
-
-  if (!dispatchPath) {
-    throw new Error("Run requires --dispatch.");
-  }
-
-  const fullPath = path.isAbsolute(dispatchPath) ? dispatchPath : path.join(cwd, dispatchPath);
-  const artifact = JSON.parse(await readFile(fullPath, "utf8"));
+  const prepareWorktree = args.includes("--prepare-worktree");
+  const { artifact } = await resolveDispatchArtifact(args, { command: "run", status: "claimed" });
 
   if (artifact.status !== "claimed") {
-    throw new Error(`Dispatch ${artifact.dispatch_id || dispatchPath} is ${artifact.status}, not claimed.`);
+    throw new Error(`Dispatch ${artifact.dispatch_id} is ${artifact.status}, not claimed.`);
   }
 
   if (!artifact.claim?.claimed_by || !artifact.claim?.claimed_at || !artifact.claim?.isolation_mode) {
@@ -1029,6 +1322,14 @@ async function runDispatch(args) {
     throw new Error("Dispatch is missing forbidden_actions.");
   }
 
+  if (prepareWorktree) {
+    if (artifact.isolation_mode !== "worktree") {
+      throw new Error("run -- --prepare-worktree requires a worktree-isolated dispatch.");
+    }
+
+    await mkdir(artifact.worktree_path, { recursive: true });
+  }
+
   const lines = [
     "# Runner Plan",
     "",
@@ -1038,13 +1339,16 @@ async function runDispatch(args) {
     `Isolation mode: ${artifact.claim.isolation_mode}`,
     `Expected branch: ${artifact.expected_branch || "TBD"}`,
     `Worktree path: ${artifact.worktree_path || "N/A"}`,
+    `Worktree prepared: ${prepareWorktree ? "yes" : "no"}`,
     `Handoff artifact: ${artifact.handoff_artifact || "TBD"}`,
     `Completion report target: ${artifact.completion_report_target || "TBD"}`,
     "",
     "Forbidden actions:",
     ...artifact.forbidden_actions.map((action) => `- ${action}`),
     "",
-    "No provider was invoked. No worktree was created. No code was changed.",
+    prepareWorktree
+      ? "No provider was invoked. Worktree directory was prepared locally. No code was changed."
+      : "No provider was invoked. No worktree was created. No code was changed.",
   ];
 
   process.stdout.write(`${lines.join("\n")}\n`);
@@ -1103,7 +1407,20 @@ async function main() {
   if (command === "review-prep") {
     const issue = readOption(args, "issue");
     const pr = readOption(args, "pr");
-    const completionPath = readOption(args, "completion") || (issue ? await findLatestFile(path.join("docs", "agents", "completions"), issue) : "");
+    let completionPath = readOption(args, "completion");
+    if (!completionPath && issue) {
+      const resolution = await resolveCompletionReportFromIssue(issue);
+      if (!resolution.ok) {
+        throw new Error(renderCompletionResolutionGuidance(resolution));
+      }
+      completionPath = resolution.path;
+    }
+    if (!completionPath) {
+      throw new Error(completionRecoveryMessage("docs/agents/completions/<completion-report>.md", issue));
+    }
+    if (!(await pathExists(completionPath))) {
+      throw new Error(completionRecoveryMessage(completionPath, issue));
+    }
     const completionMarkdown = completionPath ? await readFile(completionPath, "utf8") : "";
     const reviewPrep = buildReviewPrep({
       issue,
