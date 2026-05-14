@@ -1,0 +1,61 @@
+# Workflow
+
+The Solo Operator can use the Umbrella CLI for Guided Flow or low-level commands for Manual Mode.
+
+## Guided Flow
+
+Use:
+
+```bash
+pnpm ops
+```
+
+The Umbrella CLI stages the workflow:
+
+- `pnpm ops init`: provision local workflow structure and configuration without executing workers
+- `pnpm ops prd -- --title "Feature Name"`: create a PRD artifact
+- `pnpm ops issues`: create issue slices from the latest PRD
+- `pnpm ops handoff -- --issue 123 --title "Implement slice"`: create a handoff artifact
+- `pnpm ops hitl -- --issue 123 --title "Provision API token"`: create a prepared human step artifact
+- `pnpm ops complete -- --issue 123 --status "needs human review"`: create a completion report
+- `pnpm ops review-prep -- --issue 123 --pr 456 --completion docs/agents/completions/file.md --acceptance "criterion 1|criterion 2" --dependency-changes "None" --local-refactors "None"`: validate the Review Entry Gate and create advisory review prep only when required inputs are explicit
+- `pnpm ops memory-propose -- --type workflow --title "Update workflow contract" --rationale "Why this belongs in durable memory" --target-files "docs/agents/workflow.md|CONTEXT.md" --suggested-text "Proposed durable memory text" --accept-risk "Risk if accepted" --reject-risk "Risk if rejected"`: create durable memory proposal artifacts without editing durable memory directly
+- `pnpm ops dispatch -- --issue 123 --title "Implement slice" --source manual --override-reason "Solo Operator approved"`: create dispatch-ready artifacts without calling a subagent
+- `pnpm ops claim -- --dispatch docs/agents/dispatches/dispatch-id.json --claimed-by runner-name --isolation-mode worktree`: claim a queued dispatch artifact
+- `pnpm ops qa -- --issue 123 --pr 456`: generate targeted QA for tracked work
+- `pnpm ops qa`: generate generic QA from recent commits
+- `pnpm ops board`: print the board, lane, and scheduler contract
+- `pnpm ops schedule -- --queue .ai/queue.example.json`: print a dry-run Scheduler Plan
+- `pnpm ops github:init`: print a dry-run GitHub Tracker Bootstrap report
+- `pnpm ops github:export`: export non-`Done` GitHub Project issues into `.ai/queue.json`
+- `pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json`: validate a claimed dispatch without invoking a provider
+
+## TDD
+
+TDD is part of implementation and bug-fix execution, not a separate Execution Stage. Use `docs/agents/tdd.md` when preparing or reviewing AFK implementation slices.
+
+## Review Entry Gate
+
+`pnpm ops review-prep` no longer writes a placeholder artifact unconditionally.
+
+- It loads a completion report, validates acceptance criteria, changed areas, dependency changes, local refactors, verification, gaps, risks, and follow-ups.
+- It fails with explicit missing-input messages when the Review Entry Gate is incomplete.
+- It writes advisory Review Prep only when the gate passes.
+
+## Manual Mode
+
+Use the lower-level scripts directly:
+
+```bash
+pnpm prd -- --title "Feature Name"
+pnpm issues
+pnpm qa
+```
+
+Manual Mode should produce the same artifact types as Guided Flow.
+
+## Initialization Boundary
+
+`init` sets up worker and automation-ready structure, but does not run workers, process backlog, or mutate issue state beyond creating configuration artifacts.
+
+AFK execution begins only after PRDs, issue decomposition, and tracer bullets exist.

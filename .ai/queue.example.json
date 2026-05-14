@@ -1,0 +1,28 @@
+[
+  {
+    "id": "ISSUE-1",
+    "title": "Implement first vertical slice",
+    "labels": ["enhancement", "ready-for-agent"],
+    "stage": "Ready for Handoff",
+    "lane": "Handoff",
+    "featureTrack": "example-feature",
+    "queueClass": "tracer-bullet",
+    "risk": "low",
+    "dependency": "unblocked",
+    "conflictSurface": "low",
+    "tracerBulletDone": false
+  },
+  {
+    "id": "ISSUE-2",
+    "title": "Implement follow-up routine slice",
+    "labels": ["enhancement", "ready-for-agent"],
+    "stage": "Ready for Handoff",
+    "lane": "Handoff",
+    "featureTrack": "example-feature",
+    "queueClass": "routine-afk",
+    "risk": "low",
+    "dependency": "unblocked",
+    "conflictSurface": "low",
+    "tracerBulletDone": false
+  }
+]

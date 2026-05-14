@@ -1,0 +1,13 @@
+{
+  "name": "agentic-repo-template",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "ops": "node ./scripts/ops.mjs",
+    "prd": "node ./scripts/prd.mjs",
+    "issues": "node ./scripts/issues.mjs",
+    "qa": "node ./scripts/qa.mjs",
+    "test": "node --test"
+  }
+}

@@ -1,0 +1,121 @@
+{
+  "tracker": "github",
+  "github": {
+    "owner": "",
+    "repo": "",
+    "projectUrl": "",
+    "projectId": "",
+    "projectNumber": ""
+  },
+  "domain": {
+    "layout": "single-context",
+    "contextFile": "CONTEXT.md",
+    "adrDirectory": "docs/adr"
+  },
+  "labels": {
+    "category": ["bug", "enhancement"],
+    "state": ["needs-triage", "needs-info", "ready-for-agent", "ready-for-human", "wontfix"]
+  },
+  "stages": [
+    "Inbox",
+    "Clarifying",
+    "Ready to Slice",
+    "Ready for Handoff",
+    "AFK In Progress",
+    "Human Review",
+    "QA",
+    "Bug Loop",
+    "Done"
+  ],
+  "lanes": {
+    "Intake": ["Inbox", "Clarifying"],
+    "Planning": ["Ready to Slice"],
+    "Handoff": ["Ready for Handoff"],
+    "Execution": ["AFK In Progress"],
+    "Validation": ["Human Review", "QA", "Bug Loop"],
+    "Closed": ["Done"]
+  },
+  "projectSchema": {
+    "requiredFields": [
+      {
+        "name": "Execution Stage",
+        "type": "single-select",
+        "values": ["Inbox", "Clarifying", "Ready to Slice", "Ready for Handoff", "AFK In Progress", "Human Review", "QA", "Bug Loop", "Done"]
+      },
+      {
+        "name": "Execution Lane",
+        "type": "single-select",
+        "values": ["Intake", "Planning", "Handoff", "Execution", "Validation", "Closed"]
+      },
+      {
+        "name": "Queue Class",
+        "type": "single-select",
+        "values": ["tracer-bullet", "routine-afk", "hitl"]
+      },
+      {
+        "name": "Risk",
+        "type": "single-select",
+        "values": ["low", "medium", "high"]
+      },
+      {
+        "name": "Dependency",
+        "type": "single-select",
+        "values": ["unblocked", "blocked"]
+      },
+      {
+        "name": "Conflict Surface",
+        "type": "single-select",
+        "values": ["none", "low", "medium", "high"]
+      },
+      {
+        "name": "Feature Track",
+        "type": "text",
+        "values": []
+      },
+      {
+        "name": "Dispatch ID",
+        "type": "text",
+        "values": []
+      }
+    ],
+    "optionalFields": [
+      {
+        "name": "Review Capacity Cost",
+        "type": "number",
+        "values": []
+      },
+      {
+        "name": "Runner",
+        "type": "text",
+        "values": []
+      },
+      {
+        "name": "Last Scheduler Plan",
+        "type": "text",
+        "values": []
+      },
+      {
+        "name": "PR",
+        "type": "text",
+        "values": []
+      }
+    ],
+    "recommendedViews": ["Intake", "Handoff", "AFK Ready", "Human Attention", "Validation", "Done"]
+  },
+  "schedulerSignals": ["risk", "dependency", "review_capacity", "conflict_surface", "queue_class"],
+  "schedulerDefaults": {
+    "reviewCapacity": 1,
+    "riskCost": {
+      "low": 1,
+      "medium": 2,
+      "high": "approval-required"
+    },
+    "conflictPolicy": {
+      "high": "approval-required"
+    },
+    "bugLoopBeforeNewAfk": true,
+    "tracerBulletGate": "feature-track",
+    "maxAutomatedFixAttempts": 1
+  },
+  "queueFile": ".ai/queue.json"
+}

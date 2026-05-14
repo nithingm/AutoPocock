@@ -1,0 +1,118 @@
+# Board Model
+
+The board separates Matt Pocock triage labels from delivery execution fields.
+
+## Labels
+
+Use the canonical triage roles in `docs/agents/triage-labels.md`.
+
+## Execution Stages
+
+- `Inbox`
+- `Clarifying`
+- `Ready to Slice`
+- `Ready for Handoff`
+- `AFK In Progress`
+- `Human Review`
+- `QA`
+- `Bug Loop`
+- `Done`
+
+## Execution Lanes
+
+- `Intake`: `Inbox`, `Clarifying`
+- `Planning`: `Ready to Slice`
+- `Handoff`: `Ready for Handoff`
+- `Execution`: `AFK In Progress`
+- `Validation`: `Human Review`, `QA`, `Bug Loop`
+- `Closed`: `Done`
+
+## Required Project Fields
+
+- `Execution Stage`: `Inbox`, `Clarifying`, `Ready to Slice`, `Ready for Handoff`, `AFK In Progress`, `Human Review`, `QA`, `Bug Loop`, `Done`
+- `Execution Lane`: `Intake`, `Planning`, `Handoff`, `Execution`, `Validation`, `Closed`
+- `Queue Class`: `tracer-bullet`, `routine-afk`, `hitl`
+- `Risk`: `low`, `medium`, `high`
+- `Dependency`: `unblocked`, `blocked`
+- `Conflict Surface`: `none`, `low`, `medium`, `high`
+- `Feature Track`: text
+- `Dispatch ID`: text
+
+The canonical schema lives in `.ai/ops.config.json` under `projectSchema.requiredFields`. This documentation explains the same contract for the Solo Operator.
+
+## Optional Project Fields
+
+- `Review Capacity Cost`: number
+- `Runner`: text
+- `Last Scheduler Plan`: text
+- `PR`: text or link, depending on the GitHub Project setup
+
+## Recommended Project Views
+
+- `Intake`
+- `Handoff`
+- `AFK Ready`
+- `Human Attention`
+- `Validation`
+- `Done`
+
+## Scheduler Signals
+
+The Concurrency Scheduler should use five simple signals:
+
+- `risk`: low, medium, high
+- `dependency`: blocked or unblocked
+- `review_capacity`: number of items the Solo Operator can review
+- `conflict_surface`: none, low, medium, high
+- `queue_class`: tracer-bullet or routine-afk
+
+## Pickup Rules
+
+- Only `ready-for-agent` issues in `Ready for Handoff` may enter AFK execution.
+- A task that lacks the strict handoff gate remains a HITL task.
+- The scheduler limits concurrent AFK work based on risk, review capacity, dependency status, and conflict surface.
+- High-risk or high-conflict issues require Solo Operator approval before dispatch.
+- HITL tasks block only dependent work, unless they block the tracer bullet for a feature track.
+- Non-dependent AFK slices may proceed when tracer-bullet coverage for their feature track is complete.
+
+## Local Scheduler Plan
+
+The first scheduler implementation is local and dry-run only:
+
+- It reads `.ai/ops.config.json`.
+- It reads `.ai/queue.json` or a file passed with `--queue`.
+- It prints planned dispatches and skipped reasons.
+- It stores Scheduler Plans in `docs/agents/schedules/`.
+- It does not mutate GitHub.
+- It does not call subagents.
+
+## Queue Export
+
+- `pnpm ops github:export` writes `.ai/queue.json`.
+- The export includes all non-`Done` Project issues.
+- The queue file is a snapshot cache, not the source of truth.
+- Missing project configuration should fail with a clear setup message.
+
+## Dispatch Artifacts
+
+Initial dispatch creates artifacts only:
+
+- JSON is canonical for a future runner.
+- Markdown is the readable mirror for the Solo Operator.
+- Dispatch artifacts live in `docs/agents/dispatches/`.
+- Direct provider-specific subagent calls belong in the runner layer.
+
+## Dispatch Claims
+
+The first claim implementation is file-based:
+
+- It updates dispatch JSON from `queued` to `claimed`.
+- It records `claimed_by`, `claimed_at`, and `isolation_mode`.
+- It refuses to claim dispatches that are not `queued`.
+- Atomic claiming belongs in the future runner layer.
+
+## Runner Stub
+
+- `pnpm ops run` consumes claimed Dispatch Artifacts only.
+- It validates claim metadata, Isolation Mode, and forbidden actions.
+- It prints a Runner Plan and does not invoke providers, create worktrees, or change code.
