@@ -70,6 +70,11 @@ function slugify(value) {
     .slice(0, 60);
 }
 
+function deriveWorktreePath(issue, title) {
+  const base = `${slugify(issue)}-${slugify(title)}` || "dispatch";
+  return path.join(cwd, ".worktrees", base);
+}
+
 async function runNodeScript(script, args) {
   const result = await execFileAsync(process.execPath, [path.join(cwd, "scripts", script), ...args], {
     cwd,
@@ -788,6 +793,7 @@ async function createDispatchArtifact({
   const jsonTarget = path.join(dir, `${dispatchId}.json`);
   const mdTarget = path.join(dir, `${dispatchId}.md`);
   const completionTarget = path.join(cwd, "docs", "agents", "completions", `${dispatchId}-completion.md`);
+  const worktreePath = isolationMode === "worktree" ? deriveWorktreePath(issue, title) : "";
 
   const artifact = {
     dispatch_id: dispatchId,
@@ -799,7 +805,7 @@ async function createDispatchArtifact({
     conflict_surface: conflictSurface,
     isolation_mode: isolationMode,
     expected_branch: `agent/${slugify(issue)}-${slugify(title)}`,
-    worktree_path: "",
+    worktree_path: worktreePath,
     handoff_artifact: resolvedHandoff,
     completion_report_target: completionTarget,
     allowed_commands: ["run relevant tests", "update completion report"],
@@ -840,7 +846,8 @@ async function dispatch(args) {
 async function claim(args) {
   const dispatchPath = readOption(args, "dispatch");
   const claimedBy = readOption(args, "claimed-by");
-  const isolationMode = readOption(args, "isolation-mode", "branch");
+  const requestedIsolationMode = readOption(args, "isolation-mode", "");
+  const requestedWorktreePath = readOption(args, "worktree-path");
 
   if (!dispatchPath) {
     throw new Error("Claim requires --dispatch.");
@@ -857,6 +864,14 @@ async function claim(args) {
     throw new Error(`Dispatch ${artifact.dispatch_id || dispatchPath} is ${artifact.status}, not queued.`);
   }
 
+  const isolationMode = requestedIsolationMode || artifact.isolation_mode || "branch";
+
+  if (artifact.isolation_mode && artifact.isolation_mode !== isolationMode) {
+    throw new Error(
+      `Claim isolation mode ${isolationMode} does not match dispatch isolation mode ${artifact.isolation_mode}.`,
+    );
+  }
+
   artifact.status = "claimed";
   artifact.claim = {
     claimed_by: claimedBy,
@@ -864,8 +879,15 @@ async function claim(args) {
     isolation_mode: isolationMode,
   };
 
-  if (!artifact.isolation_mode || artifact.isolation_mode === "branch") {
+  if (!artifact.isolation_mode) {
     artifact.isolation_mode = isolationMode;
+  }
+
+  if (isolationMode === "worktree") {
+    artifact.worktree_path =
+      requestedWorktreePath || artifact.worktree_path || deriveWorktreePath(artifact.issue_id, artifact.title);
+  } else if (requestedWorktreePath) {
+    throw new Error("Claim accepts --worktree-path only when isolation mode is worktree.");
   }
 
   await writeFile(fullPath, `${JSON.stringify(artifact, null, 2)}\n`, "utf8");
@@ -894,6 +916,14 @@ async function runDispatch(args) {
     throw new Error("Dispatch is missing isolation_mode.");
   }
 
+  if (artifact.claim.isolation_mode !== artifact.isolation_mode) {
+    throw new Error("Claimed dispatch isolation mode does not match dispatch isolation_mode.");
+  }
+
+  if (artifact.isolation_mode === "worktree" && !artifact.worktree_path) {
+    throw new Error("Worktree dispatch is missing worktree_path.");
+  }
+
   if (!Array.isArray(artifact.forbidden_actions) || artifact.forbidden_actions.length === 0) {
     throw new Error("Dispatch is missing forbidden_actions.");
   }
@@ -906,6 +936,7 @@ async function runDispatch(args) {
     `Claimed at: ${artifact.claim.claimed_at}`,
     `Isolation mode: ${artifact.claim.isolation_mode}`,
     `Expected branch: ${artifact.expected_branch || "TBD"}`,
+    `Worktree path: ${artifact.worktree_path || "N/A"}`,
     `Handoff artifact: ${artifact.handoff_artifact || "TBD"}`,
     `Completion report target: ${artifact.completion_report_target || "TBD"}`,
     "",

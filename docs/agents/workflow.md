@@ -73,6 +73,19 @@ TDD is part of implementation and bug-fix execution, not a separate Execution St
 - It does not mutate GitHub or invoke providers.
 - Scheduler-sourced dispatch artifacts default to `worktree` isolation.
 
+## What You Need To Do
+
+To make the whole flow work end-to-end as the Solo Operator:
+
+- Configure `.ai/ops.config.json` with the GitHub owner/repo/project reference when you want live tracker export/bootstrap behavior.
+- Install and authenticate `gh` for any GitHub-backed step such as `github:init -- --apply`, `github:export`, or `mirror -- --apply`.
+- Keep issue slices bounded enough that one handoff, one review, and one QA pass still make sense.
+- Write real handoff, completion, and review-prep artifacts instead of placeholders, because strict QA now uses that context directly.
+- Export or prepare `.ai/queue.json`, then run `pnpm ops schedule -- --dispatch` to create actual dispatch artifacts for eligible work.
+- Claim dispatches with a stable runner identity using `pnpm ops claim`; for worktree isolation, keep the derived or explicit `worktree_path` available locally.
+- Use `pnpm ops run` as the final local validation step before any future provider execution layer.
+- Use `pnpm ops qa` and `pnpm ops feedback` after implementation so QA context and bug-vs-same-PR decisions are explicit.
+
 ## Feedback
 
 `pnpm ops feedback` is local-first in this version.

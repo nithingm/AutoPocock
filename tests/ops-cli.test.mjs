@@ -163,6 +163,7 @@ test("run validates a claimed dispatch without invoking a provider", async () =>
         forbidden_actions: ["merge PR", "handle secrets"],
         expected_branch: "agent/test",
         isolation_mode: "worktree",
+        worktree_path: "D:\\temp\\worktree",
         handoff_artifact: "docs/agents/handoffs/test.md",
         completion_report_target: "docs/agents/completions/dispatch-test.md",
         claim: {
@@ -181,6 +182,7 @@ test("run validates a claimed dispatch without invoking a provider", async () =>
   assert.equal(result.code, 0);
   assert.match(result.stdout, /Runner Plan/);
   assert.match(result.stdout, /Dispatch: dispatch-test/);
+  assert.match(result.stdout, /Worktree path: D:\\temp\\worktree/);
   assert.match(result.stdout, /No provider was invoked/);
 });
 
@@ -248,6 +250,7 @@ test("schedule --dispatch creates dispatch artifacts only for dispatchable queue
   assert.equal(artifact.issue_id, "ISSUE-1");
   assert.equal(artifact.source, "scheduler-plan");
   assert.equal(artifact.isolation_mode, "worktree");
+  assert.match(artifact.worktree_path, /\.worktrees[\\/]issue-1-tracer-bullet-ready$/);
   assert.match(artifact.created_from_scheduler_plan, /docs[\\/]agents[\\/]schedules[\\/].+scheduler-plan\.md$/);
   assert.match(artifact.handoff_artifact, /docs[\\/]agents[\\/]handoffs[\\/].+ISSUE-1.+\.md$/);
 });
@@ -283,4 +286,106 @@ test("schedule --dispatch reports when no dispatch artifacts are created", async
   assert.equal(result.code, 0);
   assert.match(result.stdout, /No dispatch artifacts were created\./);
   assert.equal(dispatchEntries.length, 0);
+});
+
+test("claim preserves worktree isolation and derives a worktree path when needed", async () => {
+  const cwd = await makeWorkspace();
+  const dispatchPath = path.join(cwd, "docs", "agents", "dispatches", "dispatch-test.json");
+  await writeFile(
+    dispatchPath,
+    `${JSON.stringify(
+      {
+        dispatch_id: "dispatch-test",
+        issue_id: "ISSUE-9",
+        title: "Runner bridge",
+        status: "queued",
+        isolation_mode: "worktree",
+        worktree_path: "",
+        forbidden_actions: ["merge PR"],
+        expected_branch: "agent/issue-9-runner-bridge",
+        handoff_artifact: "",
+        completion_report_target: "docs/agents/completions/dispatch-test.md",
+        claim: null,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const result = await runOps(cwd, ["claim", "--dispatch", dispatchPath, "--claimed-by", "runner-1"]);
+  const artifact = JSON.parse(await readFile(dispatchPath, "utf8"));
+
+  assert.equal(result.code, 0);
+  assert.equal(artifact.claim.isolation_mode, "worktree");
+  assert.match(artifact.worktree_path, /\.worktrees[\\/]issue-9-runner-bridge$/);
+});
+
+test("claim rejects isolation mode mismatches", async () => {
+  const cwd = await makeWorkspace();
+  const dispatchPath = path.join(cwd, "docs", "agents", "dispatches", "dispatch-test.json");
+  await writeFile(
+    dispatchPath,
+    `${JSON.stringify(
+      {
+        dispatch_id: "dispatch-test",
+        issue_id: "ISSUE-10",
+        title: "Isolation mismatch",
+        status: "queued",
+        isolation_mode: "worktree",
+        worktree_path: "",
+        forbidden_actions: ["merge PR"],
+        expected_branch: "agent/issue-10-isolation-mismatch",
+        handoff_artifact: "",
+        completion_report_target: "docs/agents/completions/dispatch-test.md",
+        claim: null,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const result = await runOps(cwd, [
+    "claim",
+    "--dispatch",
+    dispatchPath,
+    "--claimed-by",
+    "runner-1",
+    "--isolation-mode",
+    "branch",
+  ]);
+
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /does not match dispatch isolation mode worktree/);
+});
+
+test("run rejects worktree dispatches that are missing worktree_path", async () => {
+  const cwd = await makeWorkspace();
+  const dispatchPath = path.join(cwd, "docs", "agents", "dispatches", "dispatch-test.json");
+  await writeFile(
+    dispatchPath,
+    `${JSON.stringify(
+      {
+        dispatch_id: "dispatch-test",
+        status: "claimed",
+        forbidden_actions: ["merge PR", "handle secrets"],
+        expected_branch: "agent/test",
+        isolation_mode: "worktree",
+        worktree_path: "",
+        handoff_artifact: "docs/agents/handoffs/test.md",
+        completion_report_target: "docs/agents/completions/dispatch-test.md",
+        claim: {
+          claimed_by: "test-runner",
+          claimed_at: "2026-05-14T00:00:00.000Z",
+          isolation_mode: "worktree",
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const result = await runOps(cwd, ["run", "--dispatch", dispatchPath]);
+
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /missing worktree_path/);
 });
