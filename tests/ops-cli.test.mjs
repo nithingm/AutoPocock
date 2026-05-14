@@ -389,3 +389,89 @@ test("run rejects worktree dispatches that are missing worktree_path", async () 
   assert.notEqual(result.code, 0);
   assert.match(result.stderr, /missing worktree_path/);
 });
+
+test("claim-status reports stale claimed dispatches without mutating them", async () => {
+  const cwd = await makeWorkspace();
+  const dispatchPath = path.join(cwd, "docs", "agents", "dispatches", "dispatch-test.json");
+  await writeFile(
+    dispatchPath,
+    `${JSON.stringify(
+      {
+        dispatch_id: "dispatch-test",
+        status: "claimed",
+        forbidden_actions: ["merge PR"],
+        expected_branch: "agent/test",
+        isolation_mode: "worktree",
+        worktree_path: "D:\\temp\\worktree",
+        handoff_artifact: "",
+        completion_report_target: "docs/agents/completions/dispatch-test.md",
+        claim: {
+          claimed_by: "runner-1",
+          claimed_at: "2026-05-14T00:00:00.000Z",
+          isolation_mode: "worktree",
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const result = await runOps(cwd, ["claim-status", "--dispatch", dispatchPath, "--max-age-hours", "1"]);
+  const artifact = JSON.parse(await readFile(dispatchPath, "utf8"));
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /# Claim Status/);
+  assert.match(result.stdout, /Status: claimed/);
+  assert.match(result.stdout, /Stale: yes/);
+  assert.match(result.stdout, /Solo Operator action required/);
+  assert.equal(artifact.status, "claimed");
+});
+
+test("reclaim returns a claimed dispatch to queued only with recorded approval", async () => {
+  const cwd = await makeWorkspace();
+  const dispatchPath = path.join(cwd, "docs", "agents", "dispatches", "dispatch-test.json");
+  await writeFile(
+    dispatchPath,
+    `${JSON.stringify(
+      {
+        dispatch_id: "dispatch-test",
+        status: "claimed",
+        forbidden_actions: ["merge PR"],
+        expected_branch: "agent/test",
+        isolation_mode: "worktree",
+        worktree_path: "D:\\temp\\worktree",
+        handoff_artifact: "",
+        completion_report_target: "docs/agents/completions/dispatch-test.md",
+        claim: {
+          claimed_by: "runner-1",
+          claimed_at: "2026-05-14T00:00:00.000Z",
+          isolation_mode: "worktree",
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const result = await runOps(cwd, [
+    "reclaim",
+    "--dispatch",
+    dispatchPath,
+    "--approved-by",
+    "solo-operator",
+    "--reason",
+    "Runner abandoned work",
+    "--max-age-hours",
+    "1",
+  ]);
+  const artifact = JSON.parse(await readFile(dispatchPath, "utf8"));
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /returned to queued/);
+  assert.equal(artifact.status, "queued");
+  assert.equal(artifact.claim, null);
+  assert.equal(artifact.claim_history.length, 1);
+  assert.equal(artifact.claim_history[0].reclaimed_by, "solo-operator");
+  assert.equal(artifact.claim_history[0].reclaim_reason, "Runner abandoned work");
+  assert.equal(artifact.claim_history[0].stale_at_reclaim, true);
+});

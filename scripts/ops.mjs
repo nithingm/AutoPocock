@@ -26,6 +26,8 @@ Usage:
   pnpm ops feedback -- --issue 123 --pr 456 --finding "QA finding text"
   pnpm ops dispatch -- --issue 123 --title "Implement slice" --source manual --override-reason "Solo Operator approved"
   pnpm ops claim -- --dispatch docs/agents/dispatches/dispatch-id.json --claimed-by runner-name --isolation-mode worktree
+  pnpm ops claim-status -- --dispatch docs/agents/dispatches/dispatch-id.json --max-age-hours 24
+  pnpm ops reclaim -- --dispatch docs/agents/dispatches/dispatch-id.json --approved-by solo-operator --reason "Runner abandoned work"
   pnpm ops qa -- --issue 123 --pr 456
   pnpm ops qa
   pnpm ops board
@@ -312,6 +314,28 @@ function nowForFile() {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function inspectClaimAge(artifact, maxAgeHours = 24, now = new Date()) {
+  const claimedAt = artifact?.claim?.claimed_at ? new Date(artifact.claim.claimed_at) : null;
+  if (!claimedAt || Number.isNaN(claimedAt.getTime())) {
+    return {
+      hasClaim: false,
+      claimedAt: "",
+      ageHours: null,
+      stale: false,
+      maxAgeHours,
+    };
+  }
+
+  const ageHours = (now.getTime() - claimedAt.getTime()) / (1000 * 60 * 60);
+  return {
+    hasClaim: true,
+    claimedAt: artifact.claim.claimed_at,
+    ageHours,
+    stale: ageHours > maxAgeHours,
+    maxAgeHours,
+  };
 }
 
 async function findLatestHandoff(issue) {
@@ -894,6 +918,83 @@ async function claim(args) {
   process.stdout.write(`${fullPath}\n`);
 }
 
+async function claimStatus(args) {
+  const dispatchPath = readOption(args, "dispatch");
+  const maxAgeHours = Number.parseFloat(readOption(args, "max-age-hours", "24"));
+
+  if (!dispatchPath) {
+    throw new Error("Claim status requires --dispatch.");
+  }
+
+  const fullPath = path.isAbsolute(dispatchPath) ? dispatchPath : path.join(cwd, dispatchPath);
+  const artifact = JSON.parse(await readFile(fullPath, "utf8"));
+  const inspection = inspectClaimAge(artifact, Number.isFinite(maxAgeHours) ? maxAgeHours : 24);
+
+  const lines = [
+    "# Claim Status",
+    "",
+    `Dispatch: ${artifact.dispatch_id || fullPath}`,
+    `Status: ${artifact.status || "unknown"}`,
+    `Isolation mode: ${artifact.isolation_mode || "unset"}`,
+    `Claimed by: ${artifact.claim?.claimed_by || "N/A"}`,
+    `Claimed at: ${inspection.claimedAt || "N/A"}`,
+    `Max age hours: ${inspection.maxAgeHours}`,
+    `Current age hours: ${inspection.ageHours == null ? "N/A" : inspection.ageHours.toFixed(2)}`,
+    `Stale: ${inspection.stale ? "yes" : "no"}`,
+  ];
+
+  if (inspection.stale) {
+    lines.push("", "Solo Operator action required: use `pnpm ops reclaim` to return this dispatch to queued.");
+  }
+
+  process.stdout.write(`${lines.join("\n")}\n`);
+}
+
+async function reclaim(args) {
+  const dispatchPath = readOption(args, "dispatch");
+  const approvedBy = readOption(args, "approved-by");
+  const reason = readOption(args, "reason");
+  const maxAgeHours = Number.parseFloat(readOption(args, "max-age-hours", "24"));
+
+  if (!dispatchPath) {
+    throw new Error("Reclaim requires --dispatch.");
+  }
+
+  if (!approvedBy) {
+    throw new Error("Reclaim requires --approved-by.");
+  }
+
+  if (!reason) {
+    throw new Error("Reclaim requires --reason.");
+  }
+
+  const fullPath = path.isAbsolute(dispatchPath) ? dispatchPath : path.join(cwd, dispatchPath);
+  const artifact = JSON.parse(await readFile(fullPath, "utf8"));
+
+  if (artifact.status !== "claimed" || !artifact.claim) {
+    throw new Error(`Dispatch ${artifact.dispatch_id || dispatchPath} is ${artifact.status}, not claimed.`);
+  }
+
+  const inspection = inspectClaimAge(artifact, Number.isFinite(maxAgeHours) ? maxAgeHours : 24);
+  const historyEntry = {
+    ...artifact.claim,
+    reclaimed_at: nowIso(),
+    reclaimed_by: approvedBy,
+    reclaim_reason: reason,
+    stale_at_reclaim: inspection.stale,
+    age_hours_at_reclaim: inspection.ageHours == null ? null : Number(inspection.ageHours.toFixed(2)),
+  };
+
+  artifact.claim_history = Array.isArray(artifact.claim_history) ? artifact.claim_history : [];
+  artifact.claim_history.push(historyEntry);
+  artifact.claim = null;
+  artifact.status = "queued";
+
+  await writeFile(fullPath, `${JSON.stringify(artifact, null, 2)}\n`, "utf8");
+  process.stdout.write(`${fullPath}\n`);
+  process.stdout.write(`Reclaimed by ${approvedBy}. Dispatch returned to queued.\n`);
+}
+
 async function runDispatch(args) {
   const dispatchPath = readOption(args, "dispatch");
 
@@ -1071,6 +1172,16 @@ async function main() {
 
   if (command === "claim") {
     await claim(args);
+    return;
+  }
+
+  if (command === "claim-status") {
+    await claimStatus(args);
+    return;
+  }
+
+  if (command === "reclaim") {
+    await reclaim(args);
     return;
   }
 

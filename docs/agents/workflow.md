@@ -24,6 +24,8 @@ The Umbrella CLI stages the workflow:
 - `pnpm ops feedback -- --issue 123 --pr 456 --finding "QA finding text"`: classify a QA finding into a Same-PR Fix candidate or a new bug draft, and write a local feedback artifact without mutating GitHub
 - `pnpm ops dispatch -- --issue 123 --title "Implement slice" --source manual --override-reason "Solo Operator approved"`: create dispatch-ready artifacts without calling a subagent
 - `pnpm ops claim -- --dispatch docs/agents/dispatches/dispatch-id.json --claimed-by runner-name --isolation-mode worktree`: claim a queued dispatch artifact
+- `pnpm ops claim-status -- --dispatch docs/agents/dispatches/dispatch-id.json --max-age-hours 24`: inspect whether a claimed dispatch looks stale
+- `pnpm ops reclaim -- --dispatch docs/agents/dispatches/dispatch-id.json --approved-by solo-operator --reason "Runner abandoned work"`: explicitly return a claimed dispatch to `queued`
 - `pnpm ops qa -- --issue 123 --pr 456`: generate targeted QA for tracked work
 - `pnpm ops qa`: generate generic QA from recent commits
 - `pnpm ops board`: print the board, lane, and scheduler contract
@@ -83,6 +85,8 @@ To make the whole flow work end-to-end as the Solo Operator:
 - Write real handoff, completion, and review-prep artifacts instead of placeholders, because strict QA now uses that context directly.
 - Export or prepare `.ai/queue.json`, then run `pnpm ops schedule -- --dispatch` to create actual dispatch artifacts for eligible work.
 - Claim dispatches with a stable runner identity using `pnpm ops claim`; for worktree isolation, keep the derived or explicit `worktree_path` available locally.
+- Use `pnpm ops claim-status` to inspect old claims before restarting or recycling work.
+- Use `pnpm ops reclaim` only when you have decided the old claim should be abandoned; the reclaim command records that approval locally.
 - Use `pnpm ops run` as the final local validation step before any future provider execution layer.
 - Use `pnpm ops qa` and `pnpm ops feedback` after implementation so QA context and bug-vs-same-PR decisions are explicit.
 
