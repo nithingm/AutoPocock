@@ -54,6 +54,7 @@ Execution lanes:
 
 - Scheduler is dry-run by default and writes Scheduler Plans.
 - Scheduler Plans are stored in `docs/agents/schedules/`.
+- `pnpm ops schedule -- --dispatch` converts `DISPATCH` decisions into local Dispatch Artifacts.
 - Review Capacity defaults to config and can be overridden per run.
 - Bug Loop work consumes capacity before new AFK dispatch.
 - Conflict Surface is manually declared first, with optional CLI estimation later.

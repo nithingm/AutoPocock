@@ -56,6 +56,7 @@ Those come after the manual loop is stable.
 3. Generate issue slices with `pnpm ops issues`.
 4. Prepare AFK-ready work with `pnpm ops handoff -- --issue 123 --title "Implement slice"`.
 5. Run `pnpm ops review-prep` only after the Review Entry Gate inputs are explicit.
-6. Run `pnpm ops qa`.
-7. Run `pnpm ops feedback` to classify QA findings before deciding on Same-PR fixes or bug follow-ups.
-8. Capture defects as new issues instead of widening the current change.
+6. Export or prepare queue input, then run `pnpm ops schedule -- --dispatch` to create dispatch artifacts for eligible AFK work.
+7. Run `pnpm ops qa`.
+8. Run `pnpm ops feedback` to classify QA findings before deciding on Same-PR fixes or bug follow-ups.
+9. Capture defects as new issues instead of widening the current change.

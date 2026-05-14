@@ -638,6 +638,7 @@ async function schedule(args) {
   const config = await loadJson(".ai/ops.config.json");
   const queuePath = readOption(args, "queue", config.queueFile || ".ai/queue.json");
   const capacityOverride = readOption(args, "review-capacity");
+  const shouldDispatch = args.includes("--dispatch");
   const queueFullPath = path.isAbsolute(queuePath) ? queuePath : path.join(cwd, queuePath);
 
   if (!(await pathExists(queueFullPath))) {
@@ -650,12 +651,14 @@ async function schedule(args) {
   const bugLoop = queue.filter((item) => item.stage === "Bug Loop");
   const candidates = queue.filter((item) => item.stage !== "Bug Loop");
   const ordered = config.schedulerDefaults?.bugLoopBeforeNewAfk ? [...bugLoop, ...candidates] : queue;
+  const decisions = [];
 
   const lines = [
     "# Scheduler Plan",
     "",
     `Queue: ${queuePath}`,
     `Review capacity: ${reviewCapacity}`,
+    `Dispatch mode: ${shouldDispatch ? "enabled" : "dry-run only"}`,
     "",
     "## Decisions",
     "",
@@ -663,11 +666,12 @@ async function schedule(args) {
 
   for (const item of ordered) {
     const decision = evaluateQueueItem(item, context);
+    decisions.push({ item, decision });
     lines.push(`- ${decision.action.toUpperCase()}: ${item.id} ${item.title} - ${decision.reason}`);
   }
 
   lines.push("", `Remaining review capacity: ${context.remainingCapacity}`, "");
-  lines.push("No tracker state was changed and no subagents were dispatched.");
+  lines.push(shouldDispatch ? "Dispatch artifacts will be created for DISPATCH decisions only." : "No tracker state was changed and no subagents were dispatched.");
 
   const plan = `${lines.join("\n")}\n`;
   const date = nowForFile();
@@ -678,6 +682,31 @@ async function schedule(args) {
 
   process.stdout.write(plan);
   process.stdout.write(`\nSaved scheduler plan: ${target}\n`);
+
+  if (!shouldDispatch) {
+    return;
+  }
+
+  const dispatchable = decisions.filter(({ decision }) => decision.action === "dispatch");
+  if (dispatchable.length === 0) {
+    process.stdout.write("No dispatch artifacts were created.\n");
+    return;
+  }
+
+  for (const { item } of dispatchable) {
+    const created = await createDispatchArtifact({
+      issue: item.id,
+      title: item.title,
+      source: "scheduler-plan",
+      plan: target,
+      featureTrack: item.featureTrack || "TBD",
+      queueClass: item.queueClass || "tracer-bullet",
+      risk: item.risk || "low",
+      conflictSurface: item.conflictSurface || "low",
+      isolationMode: "worktree",
+    });
+    process.stdout.write(`${created.jsonTarget}\n${created.mdTarget}\n`);
+  }
 }
 
 function dispatchMarkdown(dispatch) {
@@ -722,19 +751,19 @@ ${dispatch.forbidden_actions.map((action) => `  - ${action}`).join("\n")}
 `;
 }
 
-async function dispatch(args) {
-  const issue = readOption(args, "issue");
-  const title = readOption(args, "title");
-  const source = readOption(args, "source", "manual");
-  const overrideReason = readOption(args, "override-reason");
-  const plan = readOption(args, "plan");
-  const featureTrack = readOption(args, "feature-track", "TBD");
-  const queueClass = readOption(args, "queue-class", "tracer-bullet");
-  const risk = readOption(args, "risk", "low");
-  const conflictSurface = readOption(args, "conflict-surface", "low");
-  const isolationMode = readOption(args, "isolation-mode", "branch");
-  const handoff = readOption(args, "handoff") || (issue ? await findLatestHandoff(issue) : "");
-
+async function createDispatchArtifact({
+  issue,
+  title,
+  source = "manual",
+  overrideReason = "",
+  plan = "",
+  featureTrack = "TBD",
+  queueClass = "tracer-bullet",
+  risk = "low",
+  conflictSurface = "low",
+  isolationMode = "branch",
+  handoff = "",
+} = {}) {
   if (!issue) {
     throw new Error("Dispatch requires --issue.");
   }
@@ -750,6 +779,8 @@ async function dispatch(args) {
   if (source === "scheduler-plan" && !plan) {
     throw new Error("Scheduler-sourced dispatch requires --plan.");
   }
+
+  const resolvedHandoff = handoff || (issue ? await findLatestHandoff(issue) : "");
 
   const timestamp = nowForFile();
   const dispatchId = `dispatch-${timestamp}-${slugify(issue)}`;
@@ -769,7 +800,7 @@ async function dispatch(args) {
     isolation_mode: isolationMode,
     expected_branch: `agent/${slugify(issue)}-${slugify(title)}`,
     worktree_path: "",
-    handoff_artifact: handoff,
+    handoff_artifact: resolvedHandoff,
     completion_report_target: completionTarget,
     allowed_commands: ["run relevant tests", "update completion report"],
     forbidden_actions: ["merge PR", "change durable memory without approval", "handle secrets", "make unrelated dependency changes"],
@@ -785,7 +816,25 @@ async function dispatch(args) {
   await writeFile(jsonTarget, `${JSON.stringify(artifact, null, 2)}\n`, "utf8");
   await writeFile(mdTarget, dispatchMarkdown(artifact), "utf8");
 
-  process.stdout.write(`${jsonTarget}\n${mdTarget}\n`);
+  return { artifact, jsonTarget, mdTarget };
+}
+
+async function dispatch(args) {
+  const created = await createDispatchArtifact({
+    issue: readOption(args, "issue"),
+    title: readOption(args, "title"),
+    source: readOption(args, "source", "manual"),
+    overrideReason: readOption(args, "override-reason"),
+    plan: readOption(args, "plan"),
+    featureTrack: readOption(args, "feature-track", "TBD"),
+    queueClass: readOption(args, "queue-class", "tracer-bullet"),
+    risk: readOption(args, "risk", "low"),
+    conflictSurface: readOption(args, "conflict-surface", "low"),
+    isolationMode: readOption(args, "isolation-mode", "branch"),
+    handoff: readOption(args, "handoff"),
+  });
+
+  process.stdout.write(`${created.jsonTarget}\n${created.mdTarget}\n`);
 }
 
 async function claim(args) {

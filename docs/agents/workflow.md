@@ -28,6 +28,7 @@ The Umbrella CLI stages the workflow:
 - `pnpm ops qa`: generate generic QA from recent commits
 - `pnpm ops board`: print the board, lane, and scheduler contract
 - `pnpm ops schedule -- --queue .ai/queue.example.json`: print a dry-run Scheduler Plan
+- `pnpm ops schedule -- --queue .ai/queue.example.json --dispatch`: create dispatch artifacts for `DISPATCH` decisions in the generated Scheduler Plan
 - `pnpm ops github:init`: print a dry-run GitHub Tracker Bootstrap report
 - `pnpm ops github:export`: export non-`Done` GitHub Project issues into `.ai/queue.json`
 - `pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json`: validate a claimed dispatch without invoking a provider
@@ -62,6 +63,15 @@ TDD is part of implementation and bug-fix execution, not a separate Execution St
 - The command prints the target issue or PR and the summarized comment body before any posting behavior.
 - Full Scheduler Plans are blocked by default because they are too noisy for issue comments.
 - GitHub posting requires explicit `--apply`.
+
+## Scheduler Dispatch
+
+`pnpm ops schedule -- --dispatch` stays local-first.
+
+- It still writes a Scheduler Plan before doing anything else.
+- It creates Dispatch Artifacts only for items that resolved to `DISPATCH`.
+- It does not mutate GitHub or invoke providers.
+- Scheduler-sourced dispatch artifacts default to `worktree` isolation.
 
 ## Feedback
 

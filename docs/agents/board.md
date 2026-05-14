@@ -86,6 +86,12 @@ The first scheduler implementation is local and dry-run only:
 - It does not mutate GitHub.
 - It does not call subagents.
 
+`pnpm ops schedule -- --dispatch` is the first bridge out of pure dry-run:
+
+- It still generates and stores a Scheduler Plan first.
+- It creates Dispatch Artifacts only for plan entries that resolved to `DISPATCH`.
+- It remains local-only and does not invoke providers or mutate GitHub.
+
 ## Queue Export
 
 - `pnpm ops github:export` writes `.ai/queue.json`.

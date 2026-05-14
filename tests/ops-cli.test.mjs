@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -182,4 +182,105 @@ test("run validates a claimed dispatch without invoking a provider", async () =>
   assert.match(result.stdout, /Runner Plan/);
   assert.match(result.stdout, /Dispatch: dispatch-test/);
   assert.match(result.stdout, /No provider was invoked/);
+});
+
+test("schedule --dispatch creates dispatch artifacts only for dispatchable queue items", async () => {
+  const cwd = await makeWorkspace({
+    root: {
+      schedulerDefaults: {
+        reviewCapacity: 2,
+        riskCost: { low: 1, medium: 2, high: "approval-required" },
+        bugLoopBeforeNewAfk: true,
+      },
+    },
+  });
+  await mkdir(path.join(cwd, "docs", "agents", "handoffs"), { recursive: true });
+  await writeFile(
+    path.join(cwd, ".ai", "queue.json"),
+    `${JSON.stringify(
+      [
+        {
+          id: "ISSUE-1",
+          title: "Tracer bullet ready",
+          labels: ["enhancement", "ready-for-agent"],
+          stage: "Ready for Handoff",
+          lane: "Handoff",
+          featureTrack: "ops-flow",
+          queueClass: "tracer-bullet",
+          risk: "low",
+          dependency: "unblocked",
+          conflictSurface: "low",
+          tracerBulletDone: false,
+        },
+        {
+          id: "ISSUE-2",
+          title: "Routine slice still gated",
+          labels: ["enhancement", "ready-for-agent"],
+          stage: "Ready for Handoff",
+          lane: "Handoff",
+          featureTrack: "ops-flow",
+          queueClass: "routine-afk",
+          risk: "low",
+          dependency: "unblocked",
+          conflictSurface: "low",
+          tracerBulletDone: false,
+        },
+      ],
+      null,
+      2,
+    )}\n`,
+  );
+  await writeFile(
+    path.join(cwd, "docs", "agents", "handoffs", "2026-05-14-ISSUE-1-ready.md"),
+    "# Context Handoff\n",
+  );
+
+  const result = await runOps(cwd, ["schedule", "--queue", ".ai/queue.json", "--dispatch"]);
+  const dispatchEntries = await readdir(path.join(cwd, "docs", "agents", "dispatches"));
+  const jsonFile = dispatchEntries.find((entry) => entry.endsWith(".json"));
+  const artifact = JSON.parse(await readFile(path.join(cwd, "docs", "agents", "dispatches", jsonFile), "utf8"));
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Dispatch mode: enabled/);
+  assert.match(result.stdout, /DISPATCH: ISSUE-1 Tracer bullet ready/);
+  assert.match(result.stdout, /SKIP: ISSUE-2 Routine slice still gated - feature track tracer bullet is not done/);
+  assert.equal(dispatchEntries.filter((entry) => entry.endsWith(".json")).length, 1);
+  assert.equal(artifact.issue_id, "ISSUE-1");
+  assert.equal(artifact.source, "scheduler-plan");
+  assert.equal(artifact.isolation_mode, "worktree");
+  assert.match(artifact.created_from_scheduler_plan, /docs[\\/]agents[\\/]schedules[\\/].+scheduler-plan\.md$/);
+  assert.match(artifact.handoff_artifact, /docs[\\/]agents[\\/]handoffs[\\/].+ISSUE-1.+\.md$/);
+});
+
+test("schedule --dispatch reports when no dispatch artifacts are created", async () => {
+  const cwd = await makeWorkspace();
+  await writeFile(
+    path.join(cwd, ".ai", "queue.json"),
+    `${JSON.stringify(
+      [
+        {
+          id: "ISSUE-3",
+          title: "Blocked slice",
+          labels: ["enhancement", "ready-for-agent"],
+          stage: "Ready for Handoff",
+          lane: "Handoff",
+          featureTrack: "ops-flow",
+          queueClass: "tracer-bullet",
+          risk: "high",
+          dependency: "unblocked",
+          conflictSurface: "low",
+          tracerBulletDone: false,
+        },
+      ],
+      null,
+      2,
+    )}\n`,
+  );
+
+  const result = await runOps(cwd, ["schedule", "--queue", ".ai/queue.json", "--dispatch"]);
+  const dispatchEntries = await readdir(path.join(cwd, "docs", "agents", "dispatches"));
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /No dispatch artifacts were created\./);
+  assert.equal(dispatchEntries.length, 0);
 });
