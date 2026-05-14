@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { access, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { buildReviewPrep, parseCompletionReport } from "./lib/review-gate.mjs";
 import { createGitHubBootstrapReport } from "./lib/github-init.mjs";
@@ -10,6 +11,7 @@ import { classifyFeedback, renderFeedbackClassification } from "./lib/feedback-c
 
 const execFileAsync = promisify(execFile);
 const cwd = process.cwd();
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 
 const help = `agentic-repo-template ops
 
@@ -256,7 +258,7 @@ async function resolveDispatchArtifact(args, { command, status }) {
 }
 
 async function runNodeScript(script, args) {
-  const result = await execFileAsync(process.execPath, [path.join(cwd, "scripts", script), ...args], {
+  const result = await execFileAsync(process.execPath, [path.join(scriptDir, script), ...args], {
     cwd,
     windowsHide: true,
   });
@@ -523,6 +525,8 @@ async function findLatestHandoff(issue) {
 async function findLatestFile(dir, needle) {
   const targetDir = path.join(cwd, dir);
   let files = [];
+  const rawNeedle = String(needle || "");
+  const normalizedNeedle = normalizeIssueRef(needle);
 
   try {
     files = await readdir(targetDir);
@@ -531,7 +535,11 @@ async function findLatestFile(dir, needle) {
   }
 
   const match = files
-    .filter((file) => file.endsWith(".md") && (!needle || file.includes(needle)))
+    .filter(
+      (file) =>
+        file.endsWith(".md") &&
+        (!needle || file.includes(rawNeedle) || (normalizedNeedle && file.includes(normalizedNeedle))),
+    )
     .sort()
     .reverse()[0];
 
