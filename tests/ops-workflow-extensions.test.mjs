@@ -182,3 +182,57 @@ test("memory-propose writes json and markdown proposal artifacts", async () => {
   assert.deepEqual(json.target_files, ["docs/agents/workflow.md", "ROADMAP.md"]);
   assert.match(markdown, /# Durable Memory Proposal: Capture review gate policy/);
 });
+
+test("mirror prints a dry-run comment target and summarized body", async () => {
+  const cwd = await makeWorkspace();
+  const artifactDir = path.join(cwd, "docs", "agents", "completions");
+  const artifactPath = path.join(artifactDir, "issue-5.md");
+  await writeFile(
+    artifactPath,
+    `# Completion Report
+
+## Result
+
+- Status: needs human review
+- Summary: Added selective mirroring
+
+## Changes
+
+- Files or areas changed: scripts/ops.mjs, scripts/lib/artifact-mirror.mjs
+
+## Verification
+
+- Commands run: node --test
+- Results: Passing
+`,
+  );
+
+  const result = await runOps(cwd, ["mirror", "--artifact", artifactPath, "--issue", "5"]);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /# Artifact Mirror/);
+  assert.match(result.stdout, /Mode: dry-run/);
+  assert.match(result.stdout, /Target: issue #5/);
+  assert.match(result.stdout, /Completion report summary/);
+  assert.match(result.stdout, /No GitHub comment was posted/);
+});
+
+test("feedback prints a dry-run classification without mutating GitHub", async () => {
+  const cwd = await makeWorkspace();
+
+  const result = await runOps(cwd, [
+    "feedback",
+    "--issue",
+    "8",
+    "--pr",
+    "314",
+    "--finding",
+    "Evidence: The review page has a typo in the Approve button. Expected Behavior: The button label should say Approve. Actual Behavior: The label says Approe.",
+  ]);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /# Feedback Classification/);
+  assert.match(result.stdout, /Classification: same-pr-fix/);
+  assert.match(result.stdout, /Solo Operator approval required: yes/);
+  assert.match(result.stdout, /No GitHub issue or comment was created\./);
+});

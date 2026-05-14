@@ -5,6 +5,8 @@ import { promisify } from "node:util";
 import { buildReviewPrep } from "./lib/review-gate.mjs";
 import { createGitHubBootstrapReport } from "./lib/github-init.mjs";
 import { createMemoryProposal, writeMemoryProposalArtifact } from "./lib/memory-proposals.mjs";
+import { buildMirrorComment, renderMirrorPlan } from "./lib/artifact-mirror.mjs";
+import { classifyFeedback, renderFeedbackClassification } from "./lib/feedback-classifier.mjs";
 
 const execFileAsync = promisify(execFile);
 const cwd = process.cwd();
@@ -20,6 +22,8 @@ Usage:
   pnpm ops complete -- --issue 123 --status "needs human review"
   pnpm ops review-prep -- --issue 123 --pr 456
   pnpm ops memory-propose -- --type workflow --title "Update workflow contract"
+  pnpm ops mirror -- --artifact docs/agents/handoffs/file.md --issue 123
+  pnpm ops feedback -- --issue 123 --pr 456 --finding "QA finding text"
   pnpm ops dispatch -- --issue 123 --title "Implement slice" --source manual --override-reason "Solo Operator approved"
   pnpm ops claim -- --dispatch docs/agents/dispatches/dispatch-id.json --claimed-by runner-name --isolation-mode worktree
   pnpm ops qa -- --issue 123 --pr 456
@@ -350,6 +354,53 @@ async function printBoard() {
   const boardPath = path.join(cwd, "docs", "agents", "board.md");
   const contents = await readFile(boardPath, "utf8");
   process.stdout.write(contents);
+}
+
+async function mirrorArtifact(args) {
+  const artifact = readOption(args, "artifact");
+  const issue = readOption(args, "issue");
+  const pr = readOption(args, "pr");
+  const apply = args.includes("--apply");
+  const artifactPath = path.isAbsolute(artifact) ? artifact : path.join(cwd, artifact);
+  const markdown = await readFile(artifactPath, "utf8");
+  const comment = buildMirrorComment({ artifactPath: artifact, markdown, issue, pr });
+  const plan = renderMirrorPlan({ artifactPath: artifact, issue, pr, comment, apply });
+
+  process.stdout.write(plan);
+
+  if (!apply) {
+    return;
+  }
+
+  const ghVersion = await commandAvailable("gh");
+  if (!ghVersion.available) {
+    throw new Error("gh CLI is required for mirror -- --apply. Install it from https://cli.github.com/.");
+  }
+
+  const auth = await commandAvailable("gh", ["auth", "status"]);
+  if (!auth.available) {
+    throw new Error("GitHub authentication is required for mirror -- --apply. Run `gh auth login` first.");
+  }
+
+  if (issue) {
+    await runCommand("gh", ["issue", "comment", issue, "--body", comment.body]);
+  } else {
+    await runCommand("gh", ["pr", "comment", pr, "--body", comment.body]);
+  }
+}
+
+async function feedbackCommand(args) {
+  if (args.includes("--apply")) {
+    throw new Error("feedback -- --apply is not implemented. No GitHub issue or comment was created.");
+  }
+
+  const result = classifyFeedback({
+    issue: readOption(args, "issue"),
+    pr: readOption(args, "pr"),
+    finding: readOption(args, "finding"),
+  });
+
+  process.stdout.write(renderFeedbackClassification(result));
 }
 
 async function gitHubInit(args = []) {
@@ -900,6 +951,16 @@ async function main() {
     });
     const written = await writeMemoryProposalArtifact(cwd, proposal);
     process.stdout.write(`${written.jsonPath}\n${written.markdownPath}\n`);
+    return;
+  }
+
+  if (command === "mirror") {
+    await mirrorArtifact(args);
+    return;
+  }
+
+  if (command === "feedback") {
+    await feedbackCommand(args);
     return;
   }
 

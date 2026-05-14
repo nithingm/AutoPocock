@@ -20,6 +20,8 @@ The Umbrella CLI stages the workflow:
 - `pnpm ops complete -- --issue 123 --status "needs human review"`: create a completion report
 - `pnpm ops review-prep -- --issue 123 --pr 456 --completion docs/agents/completions/file.md --acceptance "criterion 1|criterion 2" --dependency-changes "None" --local-refactors "None"`: validate the Review Entry Gate and create advisory review prep only when required inputs are explicit
 - `pnpm ops memory-propose -- --type workflow --title "Update workflow contract" --rationale "Why this belongs in durable memory" --target-files "docs/agents/workflow.md|CONTEXT.md" --suggested-text "Proposed durable memory text" --accept-risk "Risk if accepted" --reject-risk "Risk if rejected"`: create durable memory proposal artifacts without editing durable memory directly
+- `pnpm ops mirror -- --artifact docs/agents/handoffs/file.md --issue 123`: dry-run a selective GitHub comment mirror for supported workflow artifacts
+- `pnpm ops feedback -- --issue 123 --pr 456 --finding "QA finding text"`: classify a QA finding into a Same-PR Fix candidate or a new bug draft without mutating GitHub
 - `pnpm ops dispatch -- --issue 123 --title "Implement slice" --source manual --override-reason "Solo Operator approved"`: create dispatch-ready artifacts without calling a subagent
 - `pnpm ops claim -- --dispatch docs/agents/dispatches/dispatch-id.json --claimed-by runner-name --isolation-mode worktree`: claim a queued dispatch artifact
 - `pnpm ops qa -- --issue 123 --pr 456`: generate targeted QA for tracked work
@@ -41,6 +43,33 @@ TDD is part of implementation and bug-fix execution, not a separate Execution St
 - It loads a completion report, validates acceptance criteria, changed areas, dependency changes, local refactors, verification, gaps, risks, and follow-ups.
 - It fails with explicit missing-input messages when the Review Entry Gate is incomplete.
 - It writes advisory Review Prep only when the gate passes.
+
+## Targeted QA
+
+`pnpm ops qa -- --issue <id> --pr <ref>` is strict by default for AFK workflow.
+
+- Issue and PR identifiers are required unless `--manual` is supplied.
+- Missing handoff or completion context is a workflow failure, not a soft warning.
+- Missing Review Prep remains a warning.
+- Oversized or unclear work is reported as needing slicing and blocks a strict QA pass.
+- The command still writes a QA checklist artifact before failing so the operator can inspect the context and warnings.
+
+## Artifact Mirroring
+
+`pnpm ops mirror` is selective and dry-run by default.
+
+- Supported artifacts include handoff, Prepared Human Step, Completion Report, Review Prep, QA summaries, feedback summaries, and durable memory proposal summaries.
+- The command prints the target issue or PR and the summarized comment body before any posting behavior.
+- Full Scheduler Plans are blocked by default because they are too noisy for issue comments.
+- GitHub posting requires explicit `--apply`.
+
+## Feedback
+
+`pnpm ops feedback` is dry-run only in this version.
+
+- Minor findings may be classified as Same-PR Fix candidates, but Solo Operator approval is still required.
+- Broader defects default to new bug drafts linked back to the original issue and PR.
+- No GitHub issue or comment is created by default.
 
 ## Manual Mode
 

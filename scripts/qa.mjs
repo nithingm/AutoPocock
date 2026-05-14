@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
-import { mkdir, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
+import { renderTargetedQaChecklistContext, validateTargetedQa } from "./lib/qa-targeted.mjs";
 
 const execFileAsync = promisify(execFile);
 const cwd = process.cwd();
@@ -36,11 +37,35 @@ async function findMatchingArtifact(dir, issue) {
   return match ? path.join(targetDir, match) : null;
 }
 
+async function loadArtifact(filePath) {
+  if (!filePath) {
+    return null;
+  }
+
+  try {
+    return {
+      path: filePath,
+      content: await readFile(filePath, "utf8"),
+    };
+  } catch {
+    return {
+      path: filePath,
+      content: "",
+    };
+  }
+}
+
 async function findTargetedArtifacts(issue) {
-  const [handoff, completion, reviewPrep] = await Promise.all([
+  const [handoffPath, completionPath, reviewPrepPath] = await Promise.all([
     findMatchingArtifact(path.join("docs", "agents", "handoffs"), issue),
     findMatchingArtifact(path.join("docs", "agents", "completions"), issue),
     findMatchingArtifact(path.join("docs", "agents", "reviews"), issue),
+  ]);
+
+  const [handoff, completion, reviewPrep] = await Promise.all([
+    loadArtifact(handoffPath),
+    loadArtifact(completionPath),
+    loadArtifact(reviewPrepPath),
   ]);
 
   return { handoff, completion, reviewPrep };
@@ -141,6 +166,7 @@ function renderChecklist(commits, options = {}) {
   const targeted = Boolean(options.issue || options.pr);
   const artifacts = options.artifacts || {};
   const warnings = options.warnings || [];
+  const targetedContext = options.targetedContext || "";
 
   const commitSection =
     commits.length === 0
@@ -162,9 +188,9 @@ function renderChecklist(commits, options = {}) {
 
 - Issue: ${options.issue || "TBD"}
 - PR: ${options.pr || "TBD"}
-- Handoff: ${artifacts.handoff || "missing"}
-- Completion report: ${artifacts.completion || "missing"}
-- Review prep: ${artifacts.reviewPrep || "missing"}
+- Handoff: ${artifacts.handoff?.path || artifacts.handoff || "missing"}
+- Completion report: ${artifacts.completion?.path || artifacts.completion || "missing"}
+- Review prep: ${artifacts.reviewPrep?.path || artifacts.reviewPrep || "missing"}
 
 `
     : "";
@@ -189,7 +215,7 @@ ${warningSection}## Intent
 
 Review the latest change set as a human-in-the-loop checkpoint before issue closure.
 
-## Targeted QA Checks
+${targetedContext ? `${targetedContext}\n` : ""}## Targeted QA Checks
 
 ${targeted ? "- Confirm the implementation matches the handoff boundaries.\n- Confirm the Completion Report claims match observable behavior.\n- Confirm Review Prep risks were evaluated.\n- Confirm acceptance criteria are verifiable from the issue and artifacts." : "- No tracked issue/PR supplied; use generic repo-level QA checks."}
 
@@ -230,45 +256,30 @@ async function main() {
   await mkdir(path.join(cwd, "docs", "QA"), { recursive: true });
 
   let artifacts = {};
-  const warnings = [];
-
-  if (targeted) {
-    if (!issue || !pr) {
-      const message = "Targeted QA requires both --issue and --pr. Use --manual to generate permissive QA.";
-      if (!manual) {
-        throw new Error(message);
-      }
-      warnings.push(message);
-    }
-
-    if (issue) {
-      artifacts = await findTargetedArtifacts(issue);
-
-      if (!artifacts.handoff) {
-        const message = `Missing handoff artifact for issue ${issue}.`;
-        if (!manual) {
-          throw new Error(message);
-        }
-        warnings.push(message);
-      }
-
-      if (!artifacts.completion) {
-        const message = `Missing completion report for issue ${issue}.`;
-        if (!manual) {
-          throw new Error(message);
-        }
-        warnings.push(message);
-      }
-
-      if (!artifacts.reviewPrep) {
-        warnings.push(`Missing review prep artifact for issue ${issue}.`);
-      }
-    }
-  }
-
   const repo = await isGitRepo();
   const commits = repo ? await recentCommits() : [];
-  const checklist = renderChecklist(commits, { issue, pr, artifacts, warnings });
+  const warnings = [];
+  let targetedValidation = null;
+  let targetedContext = "";
+
+  if (targeted && issue) {
+    artifacts = await findTargetedArtifacts(issue);
+  }
+
+  if (targeted) {
+    targetedValidation = validateTargetedQa({
+      manual,
+      issue,
+      pr,
+      artifacts,
+      changedFiles: commits.flatMap((commit) => commit.files),
+      recentCommits: commits,
+    });
+    warnings.push(...targetedValidation.warnings);
+    targetedContext = renderTargetedQaChecklistContext(targetedValidation);
+  }
+
+  const checklist = renderChecklist(commits, { issue, pr, artifacts, warnings, targetedContext });
 
   const date = new Date().toISOString().slice(0, 10);
   const target = path.join(cwd, "docs", "QA", `${date}-qa-checklist.generated.md`);
@@ -276,6 +287,11 @@ async function main() {
   await writeFile(target, checklist, "utf8");
 
   process.stdout.write(`${target}\n`);
+
+  if (targetedValidation && !manual && targetedValidation.status !== "pass") {
+    const messages = [...targetedValidation.errors, ...targetedValidation.sliceSignals];
+    throw new Error(messages.join("\n"));
+  }
 }
 
 main().catch((error) => {

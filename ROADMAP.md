@@ -91,6 +91,7 @@ Execution lanes:
 - `pnpm ops github:init`: report required GitHub Project fields/views; do not create Projects in the first version.
 - `pnpm ops github:init -- --create-project`: future explicit project creation mode after label/export work is stable.
 - `pnpm ops github:export`: export GitHub issue/project metadata into `.ai/queue.json`.
+- `pnpm ops mirror`: summarize supported local workflow artifacts into dry-run GitHub comment bodies.
 - `pnpm ops memory-propose`: create durable memory proposal artifacts without editing durable memory directly.
 - `pnpm ops schedule -- --apply`: update project fields without dispatching.
 - `pnpm ops schedule -- --dispatch`: create dispatch artifacts from a Scheduler Plan.

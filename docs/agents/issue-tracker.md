@@ -22,6 +22,14 @@ GitHub is the default **Operational Tracker**.
 - It does not create labels, issues, comments, Projects, fields, or views.
 - Project creation remains manual in the first version.
 
+## Artifact Mirroring
+
+- Workflow artifacts may be mirrored into GitHub issue or PR comments for operational visibility.
+- Mirroring is selective and summarized; it is not a raw file dump.
+- Supported mirrored artifact families are handoff, HITL, completion, review prep, QA summary, feedback summary, and durable memory proposal summary.
+- Full Scheduler Plans are excluded by default.
+- `pnpm ops mirror` is dry-run by default and only posts with explicit `--apply`.
+
 ## Local Fallback
 
 When GitHub is unavailable, write issue drafts and workflow artifacts locally. Local fallback should preserve the same labels, stages, handoff templates, and completion templates so migration to GitHub stays mechanical.
