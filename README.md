@@ -28,6 +28,7 @@ pnpm qa
 - `.ai/prompts/`: reusable operating prompts for the day-shift workflow
 - `.ai/memory/`: durable project memory and ubiquitous language
 - `docs/agents/`: tracker, board, handoff, and workflow contracts
+- `docs/agents/feedback/`: local QA feedback artifacts for Same-PR Fix proposals and bug drafts
 - `docs/agents/memory-proposals/`: proposed durable memory changes awaiting Solo Operator approval
 - `docs/PRDs/`: product requirement documents
 - `docs/QA/`: generated and curated QA artifacts

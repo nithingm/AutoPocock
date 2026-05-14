@@ -308,6 +308,12 @@ ${formatList(entry.followUps)}
 
 - Suggested next stage: Human Review
 - Reason: Review Entry Gate passed with explicit acceptance, verification, boundary, and risk coverage.
+
+## Solo Operator Decisions Needed
+
+- Same-PR fix decision: Required if review findings suggest a fix should stay on this PR.
+- Memory update decision: Required if the change implies Durable Memory updates.
+- Merge decision: Required after Human Review and QA complete.
 `;
 }
 

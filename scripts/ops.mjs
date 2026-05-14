@@ -110,6 +110,7 @@ async function ensureInitStructure() {
     "docs/agents/completions",
     "docs/agents/reviews",
     "docs/agents/memory-proposals",
+    "docs/agents/feedback",
     "docs/agents/schedules",
     "docs/agents/dispatches",
     "issues",
@@ -399,8 +400,17 @@ async function feedbackCommand(args) {
     pr: readOption(args, "pr"),
     finding: readOption(args, "finding"),
   });
+  const suggestion = result.artifact_suggestion;
+  const feedbackDir = path.join(cwd, suggestion.dir);
+  const jsonTarget = path.join(cwd, suggestion.json_path);
+  const markdownTarget = path.join(cwd, suggestion.markdown_path);
+
+  await mkdir(feedbackDir, { recursive: true });
+  await writeFile(jsonTarget, `${JSON.stringify(suggestion.json_payload, null, 2)}\n`, "utf8");
+  await writeFile(markdownTarget, suggestion.markdown_payload, "utf8");
 
   process.stdout.write(renderFeedbackClassification(result));
+  process.stdout.write(`\n${jsonTarget}\n${markdownTarget}\n`);
 }
 
 async function gitHubInit(args = []) {

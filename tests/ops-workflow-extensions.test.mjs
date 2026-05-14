@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -229,10 +229,19 @@ test("feedback prints a dry-run classification without mutating GitHub", async (
     "--finding",
     "Evidence: The review page has a typo in the Approve button. Expected Behavior: The button label should say Approve. Actual Behavior: The label says Approe.",
   ]);
+  const outputLines = result.stdout.trim().split(/\r?\n/);
+  const jsonPath = outputLines[outputLines.length - 2];
+  const markdownPath = outputLines[outputLines.length - 1];
+  const json = JSON.parse(await readFile(jsonPath, "utf8"));
+  const markdown = await readFile(markdownPath, "utf8");
 
   assert.equal(result.code, 0);
   assert.match(result.stdout, /# Feedback Classification/);
   assert.match(result.stdout, /Classification: same-pr-fix/);
   assert.match(result.stdout, /Solo Operator approval required: yes/);
   assert.match(result.stdout, /No GitHub issue or comment was created\./);
+  assert.equal(json.classification, "same-pr-fix");
+  assert.match(markdown, /# Feedback Summary/);
+  assert.ok((await stat(jsonPath)).isFile());
+  assert.ok((await stat(markdownPath)).isFile());
 });

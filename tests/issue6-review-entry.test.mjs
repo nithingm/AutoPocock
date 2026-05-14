@@ -126,6 +126,19 @@ test("buildReviewPrep generates advisory markdown when the review entry gate pas
   assert.match(result.markdown, /- Gaps: None/);
   assert.match(result.markdown, /- Follow-ups:\n- None/);
   assert.match(result.markdown, /- Hook the module into CLI entry points/);
+  assert.match(result.markdown, /## Solo Operator Decisions Needed/);
+  assert.match(
+    result.markdown,
+    /- Same-PR fix decision: Required if review findings suggest a fix should stay on this PR\./,
+  );
+  assert.match(
+    result.markdown,
+    /- Memory update decision: Required if the change implies Durable Memory updates\./,
+  );
+  assert.match(
+    result.markdown,
+    /- Merge decision: Required after Human Review and QA complete\./,
+  );
 });
 
 test("generateReviewPrepMarkdown throws with explicit gate messages when validation failed", () => {

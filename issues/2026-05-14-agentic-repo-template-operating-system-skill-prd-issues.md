@@ -81,11 +81,11 @@ Extend Tracker Bootstrap so `pnpm ops github:init -- --apply` creates missing ca
 
 ### Acceptance criteria
 
-- [ ] Dry-run prints which labels would be created.
-- [ ] `--apply` creates only missing canonical labels.
-- [ ] Existing labels are not renamed, deleted, or rewritten.
-- [ ] Label color or description mismatch is reported as Tracker Drift.
-- [ ] Project fields and views remain report-only.
+- [x] Dry-run prints which labels would be created.
+- [x] `--apply` creates only missing canonical labels.
+- [x] Existing labels are not renamed, deleted, or rewritten.
+- [x] Label color or description mismatch is reported as Tracker Drift.
+- [x] Project fields and views remain report-only.
 
 ### Blocked by
 
@@ -170,11 +170,11 @@ Add a dry-run mirroring path that summarizes decision-useful local artifacts for
 
 ### Acceptance criteria
 
-- [ ] Command accepts an artifact path and issue or PR reference.
-- [ ] Dry-run prints the comment target and summarized body.
-- [ ] Supported artifacts include handoff, Prepared Human Step, Completion Report, Review Prep, Targeted QA summary, feedback summary, and memory proposal summary.
-- [ ] Full Scheduler Plans are not mirrored by default.
-- [ ] No GitHub comment is posted without an explicit apply flag.
+- [x] Command accepts an artifact path and issue or PR reference.
+- [x] Dry-run prints the comment target and summarized body.
+- [x] Supported artifacts include handoff, Prepared Human Step, Completion Report, Review Prep, Targeted QA summary, feedback summary, and memory proposal summary.
+- [x] Full Scheduler Plans are not mirrored by default.
+- [x] No GitHub comment is posted without an explicit apply flag.
 
 ### Blocked by
 
@@ -200,10 +200,10 @@ Make the local workflow validate the Review Entry Gate and generate Review Prep 
 
 ### Acceptance criteria
 
-- [ ] Command or workflow path checks acceptance criteria, verification claims, changed areas, dependency changes, Local Refactors, risks, gaps, and follow-ups.
-- [ ] Passing gate can generate a Review Prep artifact.
-- [ ] Failing gate reports missing inputs and does not generate Review Prep.
-- [ ] Review Prep remains advisory and records Solo Operator decisions still required.
+- [x] Command or workflow path checks acceptance criteria, verification claims, changed areas, dependency changes, Local Refactors, risks, gaps, and follow-ups.
+- [x] Passing gate can generate a Review Prep artifact.
+- [x] Failing gate reports missing inputs and does not generate Review Prep.
+- [x] Review Prep remains advisory and records Solo Operator decisions still required.
 
 ### Blocked by
 
@@ -229,11 +229,11 @@ Tighten Targeted QA so GitHub-backed AFK work requires issue, PR, Handoff Artifa
 
 ### Acceptance criteria
 
-- [ ] Targeted QA requires issue and PR identifiers unless `--manual` is supplied.
-- [ ] Targeted QA fails when required Handoff Artifact or Completion Report is missing.
-- [ ] Targeted QA warns when Review Prep is missing.
-- [ ] Generated checklist lists found artifacts and warnings.
-- [ ] Oversized or unclear work is reported as needing slicing instead of passing QA.
+- [x] Targeted QA requires issue and PR identifiers unless `--manual` is supplied.
+- [x] Targeted QA fails when required Handoff Artifact or Completion Report is missing.
+- [x] Targeted QA warns when Review Prep is missing.
+- [x] Generated checklist lists found artifacts and warnings.
+- [x] Oversized or unclear work is reported as needing slicing instead of passing QA.
 
 ### Blocked by
 
@@ -259,11 +259,11 @@ Add `pnpm ops feedback` to classify QA findings into Same-PR Fix proposals or ne
 
 ### Acceptance criteria
 
-- [ ] Command accepts issue, PR, and finding text.
-- [ ] Dry-run classifies the finding as Same-PR Fix candidate or new bug draft.
-- [ ] Same-PR Fix output states that Solo Operator approval is required.
-- [ ] New bug draft links original issue and PR and includes evidence, expected behavior, actual behavior, and verification notes.
-- [ ] No GitHub issue or comment is created without explicit apply behavior.
+- [x] Command accepts issue, PR, and finding text.
+- [x] Dry-run classifies the finding as Same-PR Fix candidate or new bug draft.
+- [x] Same-PR Fix output states that Solo Operator approval is required.
+- [x] New bug draft links original issue and PR and includes evidence, expected behavior, actual behavior, and verification notes.
+- [x] No GitHub issue or comment is created without explicit apply behavior.
 
 ### Blocked by
 
@@ -289,10 +289,10 @@ Add `pnpm ops memory-propose` so subagents and Solo Operators can propose Durabl
 
 ### Acceptance criteria
 
-- [ ] Command creates proposal artifacts under `docs/agents/memory-proposals/`.
-- [ ] Proposal types include `context`, `adr`, `workflow`, and `roadmap`.
-- [ ] Proposal includes rationale, target files, suggested text, and risk of accepting or rejecting.
-- [ ] Command does not edit `CONTEXT.md`, ADRs, workflow docs, or roadmap directly.
+- [x] Command creates proposal artifacts under `docs/agents/memory-proposals/`.
+- [x] Proposal types include `context`, `adr`, `workflow`, and `roadmap`.
+- [x] Proposal includes rationale, target files, suggested text, and risk of accepting or rejecting.
+- [x] Command does not edit `CONTEXT.md`, ADRs, workflow docs, or roadmap directly.
 
 ### Blocked by
 

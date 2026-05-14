@@ -1,3 +1,7 @@
+import path from "node:path";
+
+export const FEEDBACK_ARTIFACT_DIR = path.join("docs", "agents", "feedback");
+
 function assertNonEmptyString(value, fieldName) {
   if (typeof value !== "string" || value.trim() === "") {
     throw new Error(`Feedback classification requires ${fieldName}.`);
@@ -100,6 +104,15 @@ function buildBugTitle(actualBehavior) {
   return compact.slice(0, 100);
 }
 
+function slugify(value) {
+  return String(value || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+}
+
 function inferKind(finding) {
   const text = finding.toLowerCase();
   const samePrSignals = [
@@ -146,61 +159,42 @@ function inferKind(finding) {
   return "new-bug-draft";
 }
 
-export function classifyFeedback(input) {
-  const issue = normalizeTrackerRef(input?.issue, "issue");
-  const pr = normalizeTrackerRef(input?.pr, "pr");
-  const finding = assertNonEmptyString(input?.finding, "finding");
-  const sections = parseFindingSections(finding);
-  const evidence = firstNonEmptySection(sections, "evidence");
-  const expectedBehavior = firstNonEmptySection(sections, "expected_behavior");
-  const actualBehavior = firstNonEmptySection(sections, "actual_behavior", "evidence");
-  const verificationNotes = firstNonEmptySection(sections, "verification_notes");
-  const kind = inferKind(finding);
-
-  if (kind === "same-pr-fix") {
-    return {
-      kind,
-      issue,
-      pr,
-      finding,
-      decision_basis:
-        "Classified as a Same-PR Fix candidate because the finding reads like a minor correction and does not clearly expand scope.",
-      requires_solo_operator_approval: true,
-      candidate_fix: {
-        original_issue: `#${issue}`,
-        original_pr: `#${pr}`,
-        evidence,
-        expected_behavior: expectedBehavior,
-        actual_behavior: actualBehavior,
-        verification_notes: verificationNotes,
-      },
-      mode: "dry-run",
-    };
-  }
+function buildArtifactId(result, options = {}) {
+  const createdAt = options.createdAt || new Date().toISOString();
+  const date = createdAt.slice(0, 10);
+  const labelSource =
+    result.kind === "same-pr-fix"
+      ? result.candidate_fix.actual_behavior[0] || result.candidate_fix.evidence[0] || "same-pr-fix"
+      : result.bug_draft.title || result.bug_draft.actual_behavior[0] || "new-bug-draft";
+  const slug = slugify(labelSource) || result.kind;
 
   return {
-    kind,
-    issue,
-    pr,
-    finding,
-    decision_basis:
-      "Classified as a new bug draft because Same-PR Fix should remain a narrow exception and this finding needs tracked follow-up by default.",
-    bug_draft: {
-      title: buildBugTitle(actualBehavior),
-      original_issue: `#${issue}`,
-      original_pr: `#${pr}`,
-      evidence: evidence.length ? evidence : linesFromSection(finding),
-      expected_behavior: expectedBehavior,
-      actual_behavior: actualBehavior,
-      verification_notes: verificationNotes,
-    },
-    mode: "dry-run",
+    createdAt,
+    artifactId: options.artifactId || `${date}-issue-${result.issue}-pr-${result.pr}-${slug}`,
   };
 }
 
-export function renderFeedbackClassification(result) {
+function buildArtifactPayload(result, { artifactId, createdAt }) {
+  return {
+    artifact_type: "feedback-summary",
+    artifact_id: artifactId,
+    created_at: createdAt,
+    mode: result.mode,
+    classification: result.kind,
+    issue: `#${result.issue}`,
+    pr: `#${result.pr}`,
+    decision_basis: result.decision_basis,
+    github_mutation: "disabled",
+    same_pr_fix: result.kind === "same-pr-fix" ? result.candidate_fix : null,
+    bug_draft: result.kind === "new-bug-draft" ? result.bug_draft : null,
+  };
+}
+
+function renderFeedbackBody(result, options = {}) {
+  const title = options.title || "# Feedback Classification";
+  const includeArtifactSuggestion = options.includeArtifactSuggestion !== false;
   const lines = [
-    "# Feedback Classification",
+    title,
     "",
     "- Mode: dry-run",
     `- Original issue: #${result.issue}`,
@@ -240,6 +234,12 @@ export function renderFeedbackClassification(result) {
       );
     }
 
+    if (includeArtifactSuggestion && result.artifact_suggestion) {
+      lines.push("", "## Suggested Local Artifact", "");
+      lines.push(`- JSON path: ${result.artifact_suggestion.json_path}`);
+      lines.push(`- Markdown path: ${result.artifact_suggestion.markdown_path}`);
+    }
+
     lines.push("", "No GitHub issue or comment was created.");
     return `${lines.join("\n")}\n`;
   }
@@ -257,7 +257,91 @@ export function renderFeedbackClassification(result) {
     "",
     ...result.bug_draft.verification_notes.map((item) => `- ${item}`),
   );
+
+  if (includeArtifactSuggestion && result.artifact_suggestion) {
+    lines.push("", "## Suggested Local Artifact", "");
+    lines.push(`- JSON path: ${result.artifact_suggestion.json_path}`);
+    lines.push(`- Markdown path: ${result.artifact_suggestion.markdown_path}`);
+  }
+
   lines.push("", "No GitHub issue or comment was created.");
 
   return `${lines.join("\n")}\n`;
+}
+
+export function createFeedbackArtifactSuggestion(result, options = {}) {
+  const { createdAt, artifactId } = buildArtifactId(result, options);
+  const jsonPayload = buildArtifactPayload(result, { artifactId, createdAt });
+
+  return {
+    dir: FEEDBACK_ARTIFACT_DIR,
+    artifact_id: artifactId,
+    json_path: path.join(FEEDBACK_ARTIFACT_DIR, `${artifactId}.json`),
+    markdown_path: path.join(FEEDBACK_ARTIFACT_DIR, `${artifactId}.md`),
+    json_payload: jsonPayload,
+    markdown_payload: renderFeedbackBody(result, {
+      title: "# Feedback Summary",
+      includeArtifactSuggestion: false,
+    }),
+  };
+}
+
+export function classifyFeedback(input, options = {}) {
+  const issue = normalizeTrackerRef(input?.issue, "issue");
+  const pr = normalizeTrackerRef(input?.pr, "pr");
+  const finding = assertNonEmptyString(input?.finding, "finding");
+  const sections = parseFindingSections(finding);
+  const evidence = firstNonEmptySection(sections, "evidence");
+  const expectedBehavior = firstNonEmptySection(sections, "expected_behavior");
+  const actualBehavior = firstNonEmptySection(sections, "actual_behavior", "evidence");
+  const verificationNotes = firstNonEmptySection(sections, "verification_notes");
+  const kind = inferKind(finding);
+
+  const result =
+    kind === "same-pr-fix"
+      ? {
+          kind,
+          issue,
+          pr,
+          finding,
+          decision_basis:
+            "Classified as a Same-PR Fix candidate because the finding reads like a minor correction and does not clearly expand scope.",
+          requires_solo_operator_approval: true,
+          candidate_fix: {
+            original_issue: `#${issue}`,
+            original_pr: `#${pr}`,
+            evidence,
+            expected_behavior: expectedBehavior,
+            actual_behavior: actualBehavior,
+            verification_notes: verificationNotes,
+          },
+          mode: "dry-run",
+        }
+      : {
+          kind,
+          issue,
+          pr,
+          finding,
+          decision_basis:
+            "Classified as a new bug draft because Same-PR Fix should remain a narrow exception and this finding needs tracked follow-up by default.",
+          bug_draft: {
+            title: buildBugTitle(actualBehavior),
+            original_issue: `#${issue}`,
+            original_pr: `#${pr}`,
+            evidence: evidence.length ? evidence : linesFromSection(finding),
+            expected_behavior: expectedBehavior,
+            actual_behavior: actualBehavior,
+            verification_notes: verificationNotes,
+          },
+          mode: "dry-run",
+        };
+
+  return {
+    ...result,
+    artifact_suggestion: createFeedbackArtifactSuggestion(result, options),
+  };
+}
+
+export function renderFeedbackClassification(result) {
+  return renderFeedbackBody(result);
 }

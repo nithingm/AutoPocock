@@ -52,6 +52,10 @@ Source PRD: 2026-05-14-github-backed-operational-workflow.md
 
 - The Solo Operator can run `pnpm ops github:init -- --apply` to create missing canonical labels while reporting drift and leaving existing labels untouched.
 
+### Status
+
+- Implemented: `github:init -- --apply` creates only missing canonical labels after `gh` availability, authentication, and label inspection succeed; drift remains report-only.
+
 ### Queue
 
 - Type: AFK
@@ -74,7 +78,8 @@ Source PRD: 2026-05-14-github-backed-operational-workflow.md
 ### Verification
 
 - Automated: `node --check scripts/ops.mjs`.
-- Manual: dry-run shows planned creates; `--apply` works only when `gh` is authenticated.
+- Automated: coverage exists for dry-run planning, apply-only missing-label creation, drift reporting, and keeping project fields/views report-only.
+- Manual: dry-run should show planned creates; `--apply` should require authenticated `gh` access before creating missing labels.
 
 ### Non-Goals
 
@@ -156,6 +161,10 @@ Source PRD: 2026-05-14-github-backed-operational-workflow.md
 
 - The workflow clearly defines which local artifacts are mirrored to GitHub comments and exposes a dry-run mirroring stub.
 
+### Status
+
+- Implemented beyond the initial stub: `pnpm ops mirror` supports dry-run summaries now, and live comment posting exists only behind explicit `--apply` with authenticated `gh` access.
+
 ### Queue
 
 - Type: AFK
@@ -169,7 +178,7 @@ Source PRD: 2026-05-14-github-backed-operational-workflow.md
 
 - Included: docs for mirroring handoff, HITL steps, completion reports, review prep, targeted QA summaries, feedback, memory proposal summaries.
 - Included: `pnpm ops mirror -- --artifact <path> --issue 123 --dry-run`.
-- Excluded: posting comments by default.
+- Excluded: posting comments by default; comment posting requires explicit `--apply`.
 
 ### Implementation Notes
 
@@ -179,17 +188,22 @@ Source PRD: 2026-05-14-github-backed-operational-workflow.md
 ### Verification
 
 - Automated: `node --check scripts/ops.mjs`.
-- Manual: dry-run prints target issue and summary without posting.
+- Automated: coverage exists for supported artifact summaries, scheduler-plan rejection, and dry-run output that includes target and comment body summary.
+- Manual: dry-run should print the target issue or PR and summary without posting; `--apply` should require authenticated `gh` access.
 
 ### Non-Goals
 
-- Do not post GitHub comments until explicit `--apply` exists.
+- Do not post GitHub comments by default.
 
 ## Issue 6: Add `feedback` dry-run classifier
 
 ### Outcome
 
 - QA findings can be classified into Same-PR Fix proposals or new bug issue drafts without silently expanding scope.
+
+### Status
+
+- Implemented: dry-run classification is in place, local JSON and markdown feedback artifacts are written under `docs/agents/feedback/`, and GitHub mutation remains disabled.
 
 ### Queue
 
@@ -214,7 +228,8 @@ Source PRD: 2026-05-14-github-backed-operational-workflow.md
 ### Verification
 
 - Automated: `node --check scripts/ops.mjs`.
-- Manual: run feedback command and inspect generated artifact.
+- Automated: coverage exists for dry-run classification output, Same-PR approval signaling, local artifact suggestions/writes, and no-mutation behavior.
+- Manual: run the feedback command and inspect the dry-run classification output plus written local artifacts.
 
 ### Non-Goals
 
@@ -226,6 +241,10 @@ Source PRD: 2026-05-14-github-backed-operational-workflow.md
 ### Outcome
 
 - Subagents and Solo Operators can propose Durable Memory changes without applying them directly.
+
+### Status
+
+- Implemented: `pnpm ops memory-propose` writes proposal artifacts in JSON and markdown form under `docs/agents/memory-proposals/` without editing durable-memory targets directly.
 
 ### Queue
 
@@ -249,7 +268,8 @@ Source PRD: 2026-05-14-github-backed-operational-workflow.md
 ### Verification
 
 - Automated: `node --check scripts/ops.mjs`.
-- Manual: generate one proposal and inspect artifact.
+- Automated: coverage exists for proposal artifact generation, stored target files, and rendered markdown content.
+- Manual: generate a proposal and inspect the written JSON and markdown artifacts.
 
 ### Non-Goals
 
@@ -260,6 +280,10 @@ Source PRD: 2026-05-14-github-backed-operational-workflow.md
 ### Outcome
 
 - A future runner has a minimal command contract for reading claimed dispatch artifacts and validating isolation requirements without invoking a provider.
+
+### Status
+
+- Implemented: `pnpm ops run -- --dispatch <path>` validates claimed dispatch state, required claim metadata, `forbidden_actions`, and prints a no-op runner plan without invoking any provider.
 
 ### Queue
 
@@ -283,7 +307,8 @@ Source PRD: 2026-05-14-github-backed-operational-workflow.md
 ### Verification
 
 - Automated: `node --check scripts/ops.mjs`.
-- Manual: run against a claimed dispatch artifact and verify no provider call happens.
+- Automated: coverage exists for rejecting non-claimed dispatches and for the no-op runner-plan output on claimed artifacts.
+- Manual: run against a claimed dispatch artifact and verify the command only prints the runner plan and no provider call happens.
 
 ### Non-Goals
 

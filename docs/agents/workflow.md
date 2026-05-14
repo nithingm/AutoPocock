@@ -21,7 +21,7 @@ The Umbrella CLI stages the workflow:
 - `pnpm ops review-prep -- --issue 123 --pr 456 --completion docs/agents/completions/file.md --acceptance "criterion 1|criterion 2" --dependency-changes "None" --local-refactors "None"`: validate the Review Entry Gate and create advisory review prep only when required inputs are explicit
 - `pnpm ops memory-propose -- --type workflow --title "Update workflow contract" --rationale "Why this belongs in durable memory" --target-files "docs/agents/workflow.md|CONTEXT.md" --suggested-text "Proposed durable memory text" --accept-risk "Risk if accepted" --reject-risk "Risk if rejected"`: create durable memory proposal artifacts without editing durable memory directly
 - `pnpm ops mirror -- --artifact docs/agents/handoffs/file.md --issue 123`: dry-run a selective GitHub comment mirror for supported workflow artifacts
-- `pnpm ops feedback -- --issue 123 --pr 456 --finding "QA finding text"`: classify a QA finding into a Same-PR Fix candidate or a new bug draft without mutating GitHub
+- `pnpm ops feedback -- --issue 123 --pr 456 --finding "QA finding text"`: classify a QA finding into a Same-PR Fix candidate or a new bug draft, and write a local feedback artifact without mutating GitHub
 - `pnpm ops dispatch -- --issue 123 --title "Implement slice" --source manual --override-reason "Solo Operator approved"`: create dispatch-ready artifacts without calling a subagent
 - `pnpm ops claim -- --dispatch docs/agents/dispatches/dispatch-id.json --claimed-by runner-name --isolation-mode worktree`: claim a queued dispatch artifact
 - `pnpm ops qa -- --issue 123 --pr 456`: generate targeted QA for tracked work
@@ -65,10 +65,11 @@ TDD is part of implementation and bug-fix execution, not a separate Execution St
 
 ## Feedback
 
-`pnpm ops feedback` is dry-run only in this version.
+`pnpm ops feedback` is local-first in this version.
 
 - Minor findings may be classified as Same-PR Fix candidates, but Solo Operator approval is still required.
 - Broader defects default to new bug drafts linked back to the original issue and PR.
+- The command writes local JSON and markdown artifacts under `docs/agents/feedback/`.
 - No GitHub issue or comment is created by default.
 
 ## Manual Mode
