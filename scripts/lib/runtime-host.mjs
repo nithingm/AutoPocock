@@ -126,13 +126,15 @@ export function detectShell(env = process.env, platform = process.platform) {
 }
 
 export function detectHostEnvironment({ cwd, env = process.env, platform = process.platform, execPath = process.execPath } = {}) {
+  const pathSeparator = platform === "win32" ? "\\" : "/";
+
   return {
     os: platform === "win32" ? "windows" : platform,
     platform,
     arch: process.arch,
     shell: detectShell(env, platform),
     node_path: execPath,
-    path_separator: path.sep,
+    path_separator: pathSeparator,
     workspace: cwd,
   };
 }

@@ -89,5 +89,8 @@ test("CodexProvider collects a successful live result without leaking workflow s
   assert.equal(collected.providerRunStatus, "succeeded");
   assert.equal(collected.result.status, "needs human review");
   assert.match(collected.result.summary, /executed successfully/);
-  assert.match(collected.result.verificationResults.join(" | "), new RegExp(path.basename("d:\\Projects\\AutoPocock\\docs\\agents\\handoffs\\test.md")));
+  assert.match(
+    collected.result.verificationResults.join(" | "),
+    new RegExp(path.win32.basename("d:\\Projects\\AutoPocock\\docs\\agents\\handoffs\\test.md")),
+  );
 });

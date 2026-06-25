@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import { test } from "node:test";
 
 import {
@@ -33,8 +34,14 @@ Verification Notes: Re-open the review screen and confirm the corrected label.`,
   assert.equal(result.requires_solo_operator_approval, true);
   assert.deepEqual(result.candidate_fix.evidence, ['The review screen says "Approe" instead of "Approve".']);
   assert.equal(result.artifact_suggestion.dir, FEEDBACK_ARTIFACT_DIR);
-  assert.equal(result.artifact_suggestion.json_path, `${FEEDBACK_ARTIFACT_DIR}\\2026-05-14-issue-8-pr-314-the-label-is-misspelled.json`);
-  assert.equal(result.artifact_suggestion.markdown_path, `${FEEDBACK_ARTIFACT_DIR}\\2026-05-14-issue-8-pr-314-the-label-is-misspelled.md`);
+  assert.equal(
+    result.artifact_suggestion.json_path,
+    path.join(FEEDBACK_ARTIFACT_DIR, "2026-05-14-issue-8-pr-314-the-label-is-misspelled.json"),
+  );
+  assert.equal(
+    result.artifact_suggestion.markdown_path,
+    path.join(FEEDBACK_ARTIFACT_DIR, "2026-05-14-issue-8-pr-314-the-label-is-misspelled.md"),
+  );
   assert.equal(result.artifact_suggestion.json_payload.github_mutation, "disabled");
   assert.equal(result.artifact_suggestion.json_payload.same_pr_fix.original_issue, "#8");
   assert.match(result.artifact_suggestion.markdown_payload, /^# Feedback Summary/m);
