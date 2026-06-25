@@ -111,6 +111,7 @@ Usage:
   pnpm ops schedule -- --queue .ai/queue.json --infer-conflicts
   pnpm ops schedule -- --queue .ai/queue.json --apply
   pnpm ops schedule -- --queue .ai/queue.json --dispatch
+  pnpm ops schedule -- --queue .ai/queue.json --dispatch --require-lock-ref
   pnpm ops github:init
   pnpm ops github:init -- --apply --create-project --project-title "AutoPocock"
   pnpm ops github:init -- --apply --create-project-fields
@@ -2667,6 +2668,7 @@ async function schedule(args) {
   const capacityOverride = readOption(args, "review-capacity");
   const shouldDispatch = args.includes("--dispatch");
   const shouldApply = args.includes("--apply");
+  const requireLockRef = args.includes("--require-lock-ref");
   const requestedIssue = readOption(args, "issue");
   const queueFullPath = path.isAbsolute(queuePath) ? queuePath : path.join(cwd, queuePath);
 
@@ -2770,6 +2772,7 @@ async function schedule(args) {
           conflictSurface: item.conflictSurface || "low",
           isolationMode: "worktree",
           projectItemId: projectItemIdFor(item),
+          requireLockRef,
         });
         dispatchIds.set(item.id, created.artifact.dispatch_id);
         process.stdout.write(`${created.jsonTarget}\n${created.mdTarget}\n`);
@@ -2804,6 +2807,7 @@ function dispatchMarkdown(dispatch) {
 - Risk: ${dispatch.risk}
 - Conflict surface: ${dispatch.conflict_surface}
 - Isolation mode: ${dispatch.isolation_mode}
+- Distributed claim lock: ${dispatch.claim_lock_policy?.required ? `${dispatch.claim_lock_policy.provider} required` : "not required"}
 
 ## Links
 
@@ -2843,6 +2847,7 @@ async function createDispatchArtifact({
   dockerEnv = [],
   dockerVolumes = [],
   projectItemId = "",
+  requireLockRef = false,
 } = {}) {
   if (!issue) {
     throw new Error("Dispatch requires --issue.");
@@ -2903,6 +2908,7 @@ async function createDispatchArtifact({
     allowed_commands: ["run relevant tests", "update completion report"],
     forbidden_actions: ["merge PR", "change durable memory without approval", "handle secrets", "make unrelated dependency changes"],
     ...(docker ? { docker } : {}),
+    ...(requireLockRef ? { claim_lock_policy: { provider: "github-ref", required: true } } : {}),
     created_from_scheduler_plan: plan,
     source,
     override_reason: overrideReason,
@@ -2936,6 +2942,7 @@ async function dispatch(args) {
     dockerNetwork: readOption(args, "docker-network"),
     dockerEnv: splitOptionList(readOption(args, "docker-env")),
     dockerVolumes: splitOptionList(readOption(args, "docker-volume")),
+    requireLockRef: args.includes("--require-lock-ref"),
   });
 
   process.stdout.write(`${created.jsonTarget}\n${created.mdTarget}\n`);
@@ -2971,6 +2978,7 @@ async function claim(args) {
 
     const isolationMode = requestedIsolationMode || artifact.isolation_mode || "branch";
     const claimedAt = nowIso();
+    const lockPolicy = artifact.claim_lock_policy || {};
 
     if (artifact.isolation_mode && artifact.isolation_mode !== isolationMode) {
       throw new Error(
@@ -2978,7 +2986,11 @@ async function claim(args) {
       );
     }
 
-    if (applyLockRef) {
+    if (lockPolicy.required && lockPolicy.provider !== "github-ref") {
+      throw new Error(`Dispatch ${artifact.dispatch_id || fullPath} requires unsupported claim lock provider ${lockPolicy.provider || "unset"}.`);
+    }
+
+    if (applyLockRef || (lockPolicy.required && lockPolicy.provider === "github-ref")) {
       distributedLock = await acquireGitHubClaimLock({
         config: await loadJson(".ai/ops.config.json"),
         args,

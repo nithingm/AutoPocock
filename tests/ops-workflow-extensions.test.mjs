@@ -1102,6 +1102,66 @@ test("schedule --apply --dispatch writes generated dispatch IDs back to the trac
   assert.match(ghLog, new RegExp(`project item-edit --id PVTI_dispatch_item --project-id PVT_fake_project --field-id dispatch-id-field --text ${artifact.dispatch_id}`));
 });
 
+test("schedule --dispatch --require-lock-ref creates dispatches that require GitHub ref claim locks", async () => {
+  const cwd = await makeWorkspace({
+    github: {
+      owner: "nithingm",
+      repo: "AutoPocock",
+      projectNumber: "1",
+    },
+  });
+  const fakeGh = await installFakeGh(cwd);
+  await mkdir(path.join(cwd, "docs", "agents", "handoffs"), { recursive: true });
+  await writeFile(path.join(cwd, "docs", "agents", "handoffs", "2026-06-25-48-ready-dispatch.md"), "# Context Handoff\n");
+  await writeFile(
+    path.join(cwd, ".ai", "queue.json"),
+    `${JSON.stringify(
+      [
+        {
+          id: "#48",
+          title: "Lock required dispatch",
+          labels: ["enhancement", "ready-for-agent"],
+          stage: "Ready for Handoff",
+          lane: "Handoff",
+          featureTrack: "ops-flow",
+          queueClass: "tracer-bullet",
+          risk: "low",
+          dependency: "unblocked",
+          conflictSurface: "low",
+          tracerBulletDone: false,
+        },
+      ],
+      null,
+      2,
+    )}\n`,
+  );
+
+  const scheduleResult = await runOps(cwd, ["schedule", "--queue", ".ai/queue.json", "--dispatch", "--require-lock-ref"], {
+    env: fakeGh.env,
+  });
+  const dispatchEntries = await readdir(path.join(cwd, "docs", "agents", "dispatches"));
+  const jsonFile = dispatchEntries.find((entry) => entry.endsWith(".json"));
+  const dispatchPath = path.join(cwd, "docs", "agents", "dispatches", jsonFile);
+  const queuedArtifact = JSON.parse(await readFile(dispatchPath, "utf8"));
+
+  assert.equal(scheduleResult.code, 0, scheduleResult.stderr);
+  assert.deepEqual(queuedArtifact.claim_lock_policy, { provider: "github-ref", required: true });
+
+  const claimResult = await runOps(cwd, ["claim", "--dispatch", dispatchPath, "--claimed-by", "runner-a"], {
+    env: fakeGh.env,
+  });
+  const claimedArtifact = JSON.parse(await readFile(dispatchPath, "utf8"));
+  const ghLog = await readFile(fakeGh.logPath, "utf8");
+
+  assert.equal(claimResult.code, 0, claimResult.stderr);
+  assert.equal(claimedArtifact.status, "claimed");
+  assert.equal(claimedArtifact.claim.distributed_lock.provider, "github-ref");
+  const expectedRef = `refs/heads/autopocock-locks/${queuedArtifact.dispatch_id.toLowerCase()}`;
+  assert.equal(claimedArtifact.claim.distributed_lock.ref, expectedRef);
+  assert.match(claimResult.stdout, /Acquired distributed claim lock refs\/heads\/autopocock-locks\//);
+  assert.match(ghLog, new RegExp(`api repos/nithingm/AutoPocock/git/refs -f ref=${expectedRef}`));
+});
+
 test("claim --apply-tracker writes the claimed runner to the GitHub Project item", async () => {
   const cwd = await makeWorkspace({
     github: {
