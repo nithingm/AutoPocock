@@ -20,7 +20,7 @@ This audit records what current evidence proves and what it does not prove. It s
 | Review branch and local scratch state are explainable | `docs/agents/local-change-inventory.md` lists the committed PR surface, durable artifacts, intentionally unstaged scratch/demo artifacts, runtime scratch state, review order, and guardrails. | Proven locally |
 | Manual OS acceptance is visible | `docs/agents/manual-acceptance-checklist.md` records the accepted manual OS gate and points to CLI/QA regression evidence. | Proven locally |
 | Runtime setup is healthy | `pnpm ops setup` reports git, node, pnpm, GitHub CLI/auth, Codex provider, and workflow directories ready. | Proven locally |
-| Test suite is green | `pnpm test` passes 216 tests with 0 failures. | Proven locally |
+| Test suite is green | `pnpm test` passes 217 tests with 0 failures. | Proven locally |
 | Console runtime can serve current workspace state | Ephemeral `startWorkflowConsole` smoke served `/`, returned `/api/state`, and closed cleanly. | Proven locally |
 | Verification is repeatable | `pnpm verify:project -- --strict-external` runs setup, tests, console smoke, GitHub auth, Project export, and issue-state checks, then requires Project write scope plus either active visibility or a confirmed closed terminal state for issue `#45`. | Proven locally and externally |
 | GitHub Project reads work | `pnpm ops github:export -- --issue 45` can read the configured Project and write `.ai/queue.json`; after closure it exports 0 active non-Done items. | Proven |
@@ -48,7 +48,7 @@ Observed results:
 
 - strict project verification passed for local readiness, Project read path, Project write scope, and issue `#45` closed terminal state
 - setup ready
-- 216 tests passed
+- 217 tests passed
 - GitHub Project export completed with 0 active non-Done items after issue closure
 - workflow console smoke passed on an ephemeral local port
 - GitHub Actions CI passed on PR `#56` and on `main` after the merge

@@ -90,7 +90,7 @@ pnpm test
 
 Observed:
 
-- 216 tests passed
+- 217 tests passed
 - 0 tests failed
 
 Latest readiness checks recorded there:
@@ -110,7 +110,7 @@ Observed:
 - local setup reports git, node, pnpm, GitHub CLI/auth, Codex provider, and workflow directories ready; Claude Code is available through the provider registry for explicit `--provider claude` live runs
 - `github:init -- --apply --create-project` is now a guarded fresh-setup path that refuses duplicate Project creation when a Project reference exists
 - `github:init -- --apply --create-project-fields` created the missing configured optional Project fields, while continuing to report existing drift without rewriting fields
-- `run -- --prepare-docker` now exposes Docker image/workspace/network isolation plans and Docker-isolated `--execute` records a blocked Provider Run until in-container provider launch is wired
+- `run -- --prepare-docker` exposes Docker image/workspace/network isolation plans, and `run -- --execute --execute-docker` launches the rendered container command after explicit approval
 - `claim -- --apply-tracker` can write the runner lease to the GitHub Project `Runner` field when a scheduler-created dispatch retained its `project_item_id`
 - claims now record explicit lease expiry metadata, and `claim-status` uses `expires_at` when present before falling back to max-age inspection
 - `reclaim -- --apply-tracker` can clear that Project `Runner` lease during approved reclaim recovery
@@ -135,7 +135,7 @@ Observed:
 The core landing and tracker reconciliation are complete. Remaining work is product hardening beyond the current local prototype:
 
 1. Automate GitHub Project views beyond report-first bootstrap.
-2. Wire provider execution inside the prepared Docker container boundary before high-concurrency AFK execution.
+2. Define production Docker image, credential, and writable workspace lifecycle policy for high-concurrency containerized runs.
 3. Replace tracker-visible claim leases with true distributed compare-and-swap locking for multiple runners.
 4. Re-run full local tests plus strict live tracker verification after any follow-up updates.
 

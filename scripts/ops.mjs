@@ -115,6 +115,7 @@ Usage:
   pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json
   pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --prepare-worktree
   pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --prepare-docker
+  pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --execute --execute-docker
   pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --execute
   pnpm ops console -- --port 4173 --host 127.0.0.1
   pnpm ops run-status -- --run .ai/provider-runs/provider-run-id.json
@@ -211,7 +212,7 @@ function dockerSpecForDispatch(artifact, overrides = {}) {
   };
 }
 
-function dockerRunPlanForDispatch(artifact, { provider = "codex" } = {}) {
+function dockerRunPlanForDispatch(artifact, { provider = "codex", liveProvider = true } = {}) {
   const docker = dockerSpecForDispatch(artifact);
   const worktreePath = path.resolve(artifact.worktree_path || deriveWorktreePath(artifact.issue_id, artifact.title));
   const dispatchPath = artifact.dispatch_path ? path.resolve(artifact.dispatch_path) : "";
@@ -238,7 +239,8 @@ function dockerRunPlanForDispatch(artifact, { provider = "codex" } = {}) {
     "--dispatch",
     containerDispatchPath,
     "--execute",
-    "--live-provider",
+    "--inside-docker",
+    ...(liveProvider ? ["--live-provider"] : []),
     "--provider",
     provider,
   ];
@@ -2940,6 +2942,8 @@ async function runDispatch(args) {
   const prepareWorktree = args.includes("--prepare-worktree");
   const prepareDocker = args.includes("--prepare-docker");
   const execute = args.includes("--execute");
+  const executeDocker = args.includes("--execute-docker");
+  const insideDocker = args.includes("--inside-docker");
   const liveProvider = args.includes("--live-provider");
   const detach = args.includes("--detach");
   const stubResult = readOption(args, "stub-result", "success");
@@ -2965,7 +2969,7 @@ async function runDispatch(args) {
   }
 
   let dockerReadiness = null;
-  const dockerPlan = artifact.isolation_mode === "docker" ? dockerRunPlanForDispatch(artifact, { provider: selectedProvider }) : null;
+  const dockerPlan = artifact.isolation_mode === "docker" ? dockerRunPlanForDispatch(artifact, { provider: selectedProvider, liveProvider }) : null;
 
   if (prepareDocker) {
     if (artifact.isolation_mode !== "docker") {
@@ -3068,27 +3072,107 @@ async function runDispatch(args) {
         ...runtimeState,
         ...blocked.runtime,
       };
-    } else if (artifact.isolation_mode === "docker") {
+    } else if (artifact.isolation_mode === "docker" && !insideDocker) {
       dockerReadiness = dockerReadiness || await commandAvailable("docker");
-      const blocked = buildRuntimeBlockedResult({
-        bundle,
-        verificationCommand: "pnpm ops run -- --dispatch <dispatch> --prepare-docker",
-        summary: "Execution stopped before provider launch because Docker container execution is not wired yet.",
-        gap: "Docker isolation has a prepared container command, but provider execution still needs to be launched inside that container boundary.",
-        stopCondition: "containerized execution boundary not implemented",
-        escalationReason: "Run `pnpm ops run -- --dispatch <dispatch> --prepare-docker`, inspect the Docker command, and wire the container runner before high-concurrency execution.",
-      });
-      result = blocked.result;
-      providerRunStatus = blocked.providerRunStatus;
-      adapterMode = liveProvider ? "live" : "stub";
-      runtimeState = {
-        ...runtimeState,
-        ...blocked.runtime,
-        docker: {
-          ...dockerPlan,
-          available: Boolean(dockerReadiness?.available),
-        },
-      };
+      if (!executeDocker) {
+        const blocked = buildRuntimeBlockedResult({
+          bundle,
+          verificationCommand: "pnpm ops run -- --dispatch <dispatch> --prepare-docker",
+          summary: "Execution stopped before provider launch because Docker container execution requires explicit `--execute-docker` approval.",
+          gap: "Docker isolation has a prepared container command, but host-side execution was not approved for this run.",
+          stopCondition: "containerized execution requires explicit approval",
+          escalationReason: "Run `pnpm ops run -- --dispatch <dispatch> --prepare-docker`, inspect the Docker command, then rerun with `--execute --execute-docker` when the container boundary is acceptable.",
+        });
+        result = blocked.result;
+        providerRunStatus = blocked.providerRunStatus;
+        adapterMode = liveProvider ? "live" : "stub";
+        runtimeState = {
+          ...runtimeState,
+          ...blocked.runtime,
+          docker: {
+            ...dockerPlan,
+            available: Boolean(dockerReadiness?.available),
+          },
+        };
+      } else if (!dockerReadiness?.available) {
+        const blocked = buildRuntimeBlockedResult({
+          bundle,
+          verificationCommand: "pnpm ops run -- --dispatch <dispatch> --execute --execute-docker",
+          summary: "Execution stopped before Docker launch because the Docker CLI was unavailable.",
+          gap: dockerReadiness?.stderr || "Docker CLI was not found.",
+          stopCondition: "container runtime unavailable",
+          escalationReason: "Install or start Docker, then rerun with `--execute --execute-docker`.",
+        });
+        result = blocked.result;
+        providerRunStatus = blocked.providerRunStatus;
+        adapterMode = "docker";
+        runtimeState = {
+          ...runtimeState,
+          ...blocked.runtime,
+          docker: {
+            ...dockerPlan,
+            available: false,
+          },
+        };
+      } else {
+        adapterMode = liveProvider ? "docker-live" : "docker-stub";
+        try {
+          await ensureWorktreePath(artifact.worktree_path);
+          const dockerResult = await runCommand(dockerReadiness.command || dockerPlan.command, dockerPlan.args, {
+            cwd,
+            maxBuffer: 1024 * 1024 * 10,
+          });
+          commandStdout = dockerResult.stdout || "";
+          commandStderr = dockerResult.stderr || "";
+          result = {
+            status: "success",
+            summary: `Docker container execution launched through ${dockerPlan.image}. The inner provider run executed inside the declared container boundary.`,
+            changedAreas: ["docs/agents/completions", ".ai/provider-runs"],
+            verificationCommands: ["pnpm ops run -- --dispatch <dispatch> --execute --execute-docker"],
+            verificationResults: ["Docker command completed successfully."],
+            risks: [],
+            gaps: [],
+            followUps: ["Inspect the inner Provider Run artifacts emitted by the containerized run."],
+            artifactsUpdated: ["Provider Run metadata", "Completion Report"],
+          };
+          providerRunStatus = "succeeded";
+          runtimeState = {
+            ...runtimeState,
+            isolation_prepared: true,
+            stop_condition: "Docker command completed successfully.",
+            escalation_reason: "",
+            docker: {
+              ...dockerPlan,
+              available: true,
+              executed: true,
+              exit_code: 0,
+            },
+          };
+        } catch (error) {
+          commandStdout = `${error.stdout || ""}`;
+          commandStderr = `${error.stderr || error.message || ""}`;
+          const blocked = buildRuntimeBlockedResult({
+            bundle,
+            verificationCommand: "pnpm ops run -- --dispatch <dispatch> --execute --execute-docker",
+            summary: "Docker container execution failed before a successful provider result was recorded.",
+            gap: commandStderr || "Docker command failed.",
+            stopCondition: "container runtime failed",
+            escalationReason: "Inspect Docker stdout/stderr in the Provider Run metadata, then repair the container command or image.",
+          });
+          result = blocked.result;
+          providerRunStatus = blocked.providerRunStatus;
+          runtimeState = {
+            ...runtimeState,
+            ...blocked.runtime,
+            docker: {
+              ...dockerPlan,
+              available: true,
+              executed: true,
+              exit_code: error.code ?? 1,
+            },
+          };
+        }
+      }
     } else if ((bundle.execution.stop_conditions || []).length === 0 || (bundle.execution.escalation_rules || []).length === 0) {
       const blocked = buildRuntimeBlockedResult({
         bundle,
@@ -3292,7 +3376,7 @@ async function runDispatch(args) {
       claim: artifact.claim,
       execution: bundle.execution,
       runtime: runtimeState,
-      command_output: liveProvider
+      command_output: (liveProvider || String(adapterMode || "").startsWith("docker"))
         ? {
             stdout: commandStdout,
             stderr: commandStderr,

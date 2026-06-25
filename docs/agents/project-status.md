@@ -31,7 +31,7 @@ pnpm test
 
 Observed result:
 
-- 216 tests passed
+- 217 tests passed
 - 0 tests failed
 
 This proves the current local source tree is internally coherent.
@@ -158,7 +158,7 @@ The local Ralph run state is stale: it still records `#45` as `in_progress` and 
 The core landing and tracker reconciliation are complete. Remaining work is product hardening beyond the current local prototype:
 
 1. Automate GitHub Project view setup beyond the current report-first bootstrap contract.
-2. Wire provider execution inside the prepared Docker container boundary before high-concurrency AFK execution.
+2. Define production Docker image, credential, and writable workspace lifecycle policy for high-concurrency containerized runs.
 3. Replace tracker-visible claim leases with true distributed compare-and-swap locking for multiple runners.
 4. Add more provider adapters only when a concrete provider boundary is needed beyond Codex and Claude Code.
 5. Run a live end-to-end validation after any follow-up changes:

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, readdir, stat, utimes, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, readdir, stat, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -75,6 +75,43 @@ async function writeDispatch(cwd, name, artifact) {
   const dispatchPath = path.join(cwd, "docs", "agents", "dispatches", name);
   await writeFile(dispatchPath, `${JSON.stringify(artifact, null, 2)}\n`);
   return dispatchPath;
+}
+
+async function installFakeDocker(cwd) {
+  const binDir = path.join(cwd, "bin");
+  const logPath = path.join(cwd, "docker.log");
+  await mkdir(binDir, { recursive: true });
+  const shellPath = path.join(binDir, "docker");
+  await writeFile(
+    shellPath,
+    `#!/usr/bin/env sh
+if [ "$1" = "--version" ]; then echo "Docker version 99.0.0"; exit 0; fi
+printf '%s\\n' "$*" >> "$DOCKER_LOG"
+echo "docker container ran"
+exit 0
+`,
+  );
+  await chmod(shellPath, 0o755);
+  await writeFile(
+    path.join(binDir, "docker.cmd"),
+    `@echo off
+if "%1"=="--version" (
+  echo Docker version 99.0.0
+  exit /b 0
+)
+echo %*>>"%DOCKER_LOG%"
+echo docker container ran
+exit /b 0
+`,
+  );
+
+  return {
+    logPath,
+    env: {
+      PATH: `${binDir}${path.delimiter}${process.env.PATH || ""}`,
+      DOCKER_LOG: logPath,
+    },
+  };
 }
 
 test("github:export refuses to run without a project reference", async () => {
@@ -853,7 +890,7 @@ test("run --prepare-docker prints a Docker isolation plan without invoking a pro
   assert.ok((await stat(worktreePath)).isDirectory());
 });
 
-test("run --execute blocks Docker dispatches until container execution is wired", async () => {
+test("run --execute requires explicit approval before launching Docker dispatches", async () => {
   const cwd = await makeWorkspace();
   const handoffPath = path.join(cwd, "docs", "agents", "handoffs", "2026-05-14-57-docker.md");
   const completionPath = path.join(cwd, "docs", "agents", "completions", "dispatch-docker-completion.md");
@@ -910,10 +947,81 @@ test("run --execute blocks Docker dispatches until container execution is wired"
   assert.equal(result.code, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /Provider Run status: blocked/);
   assert.equal(metadata.status, "blocked");
-  assert.equal(metadata.runtime.stop_condition, "containerized execution boundary not implemented");
+  assert.equal(metadata.runtime.stop_condition, "containerized execution requires explicit approval");
   assert.equal(metadata.runtime.docker.image, "node:22-bookworm");
   assert.equal(bundle.execution.docker.image, "node:22-bookworm");
-  assert.match(completion, /Docker container execution is not wired yet/);
+  assert.match(completion, /Docker container execution requires explicit `--execute-docker` approval/);
+});
+
+test("run --execute --execute-docker launches the rendered Docker command", async () => {
+  const cwd = await makeWorkspace();
+  const fakeDocker = await installFakeDocker(cwd);
+  const handoffPath = path.join(cwd, "docs", "agents", "handoffs", "2026-05-14-57-docker.md");
+  const completionPath = path.join(cwd, "docs", "agents", "completions", "dispatch-docker-completion.md");
+  const worktreePath = path.join(cwd, ".worktrees", "docker-runner-proof");
+  const dispatchPath = path.join(cwd, "docs", "agents", "dispatches", "dispatch-docker.json");
+  await writeFile(
+    handoffPath,
+    `# Context Handoff
+
+## Goal
+
+- Prove Docker runner execution.
+`,
+  );
+  await writeFile(
+    dispatchPath,
+    `${JSON.stringify(
+      {
+        dispatch_id: "dispatch-docker",
+        issue_id: "57",
+        title: "Docker runner proof",
+        status: "claimed",
+        forbidden_actions: ["merge PR", "handle secrets"],
+        expected_branch: "agent/57-docker-runner-proof",
+        isolation_mode: "docker",
+        worktree_path: worktreePath,
+        docker: {
+          image: "node:22-bookworm",
+          workspace: "/workspace",
+          network: "none",
+          container_name: "autopocock-57-docker-runner-proof",
+        },
+        handoff_artifact: handoffPath,
+        completion_report_target: completionPath,
+        claim: {
+          claimed_by: "docker-runner",
+          claimed_at: "2026-05-14T00:00:00.000Z",
+          isolation_mode: "docker",
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const result = await runOps(cwd, ["run", "--dispatch", dispatchPath, "--execute", "--execute-docker"], {
+    env: fakeDocker.env,
+  });
+  const providerRunDir = path.join(cwd, ".ai", "provider-runs");
+  const providerRunFiles = await readdir(providerRunDir);
+  const metadataFile = providerRunFiles.find((entry) => /^provider-run-.*\.json$/.test(entry) && !entry.includes("-bundle."));
+  const metadata = JSON.parse(await readFile(path.join(providerRunDir, metadataFile), "utf8"));
+  const dockerLog = await readFile(fakeDocker.logPath, "utf8");
+  const completion = await readFile(completionPath, "utf8");
+
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Provider: codex \(docker-stub\)/);
+  assert.match(result.stdout, /Provider Run status: succeeded/);
+  assert.equal(metadata.status, "succeeded");
+  assert.equal(metadata.adapter_mode, "docker-stub");
+  assert.equal(metadata.runtime.docker.executed, true);
+  assert.equal(metadata.runtime.docker.exit_code, 0);
+  assert.match(metadata.command_output.stdout, /docker container ran/);
+  assert.match(dockerLog, /run --rm -t --name autopocock-57-docker-runner-proof/);
+  assert.match(dockerLog, /--inside-docker/);
+  assert.doesNotMatch(dockerLog, /--live-provider/);
+  assert.match(completion, /Docker container execution launched through node:22-bookworm/);
 });
 
 test("run --execute --live-provider --detach launches a background worker and run-status reports completion", async () => {

@@ -116,7 +116,7 @@ export async function commandAvailable(command, args = ["--version"], options = 
   for (const candidate of candidates) {
     try {
       const result = await runCommandAvailabilityCandidate(candidate, args, options);
-      return { available: true, stdout: result.stdout.trim(), stderr: result.stderr.trim() };
+      return { available: true, command: candidate, stdout: result.stdout.trim(), stderr: result.stderr.trim() };
     } catch (error) {
       lastError = error;
     }
@@ -126,6 +126,7 @@ export async function commandAvailable(command, args = ["--version"], options = 
   const tried = candidates.length > 1 ? `Tried: ${candidates.join(", ")}. ` : "";
   return {
     available: false,
+    command: "",
     stdout: `${error.stdout || ""}`.trim(),
     stderr: `${tried}${error.stderr || error.message || ""}`.trim(),
   };
