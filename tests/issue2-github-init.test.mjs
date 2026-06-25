@@ -7,6 +7,7 @@ import {
   buildProjectViewPlan,
   createGitHubBootstrapReport,
   inspectProjectFields,
+  inspectProjectViewMutationCapability,
   inspectProjectViews,
   planProjectCreateCommand,
   renderProjectViewPlanMarkdown,
@@ -223,6 +224,31 @@ test("Project view inspection detects exact-name misses and whitespace drift", (
   assert.equal(inspection[2].status, "missing");
 });
 
+test("Project view mutation capability is derived from live GraphQL mutation names", () => {
+  const unavailable = inspectProjectViewMutationCapability([
+    "createProjectV2",
+    "createProjectV2Field",
+    "updateProjectV2ItemFieldValue",
+    "markFileAsViewed",
+  ]);
+
+  assert.equal(unavailable.inspected, true);
+  assert.equal(unavailable.view_mutations_available, false);
+  assert.deepEqual(unavailable.matching_mutations, []);
+  assert.match(unavailable.reason, /not ProjectV2 view create\/update\/rename mutations/);
+
+  const available = inspectProjectViewMutationCapability([
+    "createProjectV2View",
+    "updateProjectV2View",
+    "deleteProjectV2Field",
+  ]);
+
+  assert.equal(available.inspected, true);
+  assert.equal(available.view_mutations_available, true);
+  assert.deepEqual(available.matching_mutations, ["createProjectV2View", "updateProjectV2View"]);
+  assert.match(available.reason, /candidate ProjectV2 view mutations/);
+});
+
 test("Project view plan converts inspection gaps into a prepared human step", () => {
   const inspection = inspectProjectViews(["Intake", "Validation", "Done"], [
     { name: "Intake", layout: "TABLE_LAYOUT", number: 1 },
@@ -250,6 +276,8 @@ test("Project view plan converts inspection gaps into a prepared human step", ()
   );
   assert.match(markdown, /Create Project view: Done \(TABLE_LAYOUT\)/);
   assert.match(markdown, /Rename Project view #2:  Validation -> Validation/);
+  assert.match(markdown, /Schema inspected: no/);
+  assert.match(markdown, /Matching mutations: none/);
   assert.match(markdown, /Command: `pnpm ops github:init`/);
   assert.match(markdown, /template_project_copy/);
 });

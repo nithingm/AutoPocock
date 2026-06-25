@@ -1683,6 +1683,7 @@ async function gitHubInit(args = []) {
   let existingLabels = [];
   let existingProjectFields = [];
   let existingProjectViews = [];
+  let graphqlMutationNames = null;
   let labelInspectionAvailable = false;
   let projectFieldInspectionAvailable = false;
   let projectViewInspectionAvailable = false;
@@ -1782,6 +1783,23 @@ async function gitHubInit(args = []) {
     }
   }
 
+  if (ghVersion.available && auth?.available) {
+    try {
+      const mutationResult = await runCommand("gh", [
+        "api",
+        "graphql",
+        "--raw-field",
+        "query=query { __schema { mutationType { fields { name } } } }",
+      ]);
+      const parsed = JSON.parse(mutationResult.stdout || "{}");
+      graphqlMutationNames = (parsed.data?.__schema?.mutationType?.fields || [])
+        .map((field) => field.name)
+        .filter(Boolean);
+    } catch {
+      graphqlMutationNames = null;
+    }
+  }
+
   if (createProjectFields && !createProject && !projectFieldInspectionAvailable) {
     throw new Error("github:init -- --create-project-fields could not inspect existing Project fields. Fix Project access before applying.");
   }
@@ -1801,6 +1819,7 @@ async function gitHubInit(args = []) {
     existingLabels,
     ...(projectFieldInspectionAvailable ? { existingProjectFields } : {}),
     ...(projectViewInspectionAvailable ? { existingProjectViews } : {}),
+    graphqlMutationNames,
     templatePresent: await pathExists(templatePath),
     runner: async (command, args) => runCommand(command, [...args, ...repoArgs]),
     projectRunner: async (command, args) => runCommand(command, args),
@@ -1822,6 +1841,7 @@ async function gitHubInit(args = []) {
       repository: project,
       projectViews: config.projectSchema?.recommendedViews || [],
       projectViewInspection: report.projectViewInspection,
+      projectViewMutationCapability: report.projectViewMutationCapability,
       generatedAt,
     });
     const fileSlug = `${nowForFile()}-github-project-views`;

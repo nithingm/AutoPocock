@@ -242,6 +242,38 @@ function normalizeExistingProjectView(view) {
   };
 }
 
+export function inspectProjectViewMutationCapability(mutationNames = null) {
+  if (!Array.isArray(mutationNames)) {
+    return {
+      inspected: false,
+      view_mutations_available: false,
+      matching_mutations: [],
+      reason: "GitHub GraphQL mutation schema was not inspected for ProjectV2 view mutations.",
+    };
+  }
+
+  const matchingMutations = mutationNames
+    .map((name) => String(name || ""))
+    .filter((name) => /projectv2/i.test(name) && /view/i.test(name))
+    .sort();
+
+  if (matchingMutations.length > 0) {
+    return {
+      inspected: true,
+      view_mutations_available: true,
+      matching_mutations: matchingMutations,
+      reason: `GitHub GraphQL currently exposes candidate ProjectV2 view mutations: ${matchingMutations.join(", ")}.`,
+    };
+  }
+
+  return {
+    inspected: true,
+    view_mutations_available: false,
+    matching_mutations: [],
+    reason: "GitHub CLI/GraphQL expose ProjectV2 project, item, and field mutations, but not ProjectV2 view create/update/rename mutations.",
+  };
+}
+
 export function inspectProjectViews(recommendedViews = [], existingViews = []) {
   const existingByName = new Map(
     (existingViews || [])
@@ -302,6 +334,7 @@ export function buildProjectViewPlan({
   repository = {},
   projectViews = [],
   projectViewInspection = [],
+  projectViewMutationCapability = inspectProjectViewMutationCapability(),
   generatedAt = new Date().toISOString(),
 } = {}) {
   const missing = projectViewInspection.filter((view) => view.status === "missing");
@@ -322,8 +355,10 @@ export function buildProjectViewPlan({
       project_number: repository.projectNumber || "",
     },
     api_status: {
-      view_mutations_available: false,
-      reason: "GitHub CLI/GraphQL expose ProjectV2 project, item, and field mutations, but not ProjectV2 view create/update/rename mutations.",
+      inspected: Boolean(projectViewMutationCapability.inspected),
+      view_mutations_available: Boolean(projectViewMutationCapability.view_mutations_available),
+      matching_mutations: projectViewMutationCapability.matching_mutations || [],
+      reason: projectViewMutationCapability.reason,
     },
     summary: {
       recommended_views: projectViews.length,
@@ -360,7 +395,7 @@ export function buildProjectViewPlan({
       {
         name: "browser_ui_automation",
         status: "last_resort",
-        guidance: "A one-off browser automation helper can drive the GitHub UI, but it should stay outside core automation because Project view UI selectors and flows are not stable contracts.",
+        guidance: "A one-off browser automation helper can drive the GitHub UI from an authenticated browser session, but it should stay outside core automation because Project view UI selectors and flows are not stable contracts.",
       },
     ],
   };
@@ -375,7 +410,9 @@ export function renderProjectViewPlanMarkdown(plan) {
     "",
     "## API Status",
     "",
+    `- Schema inspected: ${plan.api_status.inspected ? "yes" : "no"}`,
     `- View mutations available: ${plan.api_status.view_mutations_available ? "yes" : "no"}`,
+    `- Matching mutations: ${plan.api_status.matching_mutations?.length > 0 ? plan.api_status.matching_mutations.join(", ") : "none"}`,
     `- Reason: ${plan.api_status.reason}`,
     "",
     "## Summary",
@@ -489,6 +526,7 @@ export function renderGitHubBootstrapReport({
   projectFieldInspection = [],
   projectViews = [],
   projectViewInspection = [],
+  projectViewMutationCapability = inspectProjectViewMutationCapability(),
   createCommands = [],
   projectFieldCreateCommands = [],
   applyResults = [],
@@ -660,6 +698,12 @@ export function renderGitHubBootstrapReport({
     lines.push(`- ${view}`);
   }
 
+  lines.push("", "## Project View Mutation Capability", "");
+  lines.push(`- Schema inspected: ${projectViewMutationCapability.inspected ? "yes" : "no"}`);
+  lines.push(`- View mutations available: ${projectViewMutationCapability.view_mutations_available ? "yes" : "no"}`);
+  lines.push(`- Matching mutations: ${projectViewMutationCapability.matching_mutations?.length > 0 ? projectViewMutationCapability.matching_mutations.join(", ") : "none"}`);
+  lines.push(`- Reason: ${projectViewMutationCapability.reason}`);
+
   lines.push("", "## Project View Inspection", "");
   if (projectViewInspection.length === 0) {
     lines.push("- Status: unavailable");
@@ -681,7 +725,11 @@ export function renderGitHubBootstrapReport({
 
   lines.push("", "## Planned Project View Changes", "");
   if (projectViewInspection.some((view) => view.status === "missing" || view.status === "drift")) {
-    lines.push("- No automatic Project view changes are available through GitHub CLI/GraphQL.");
+    if (projectViewMutationCapability.view_mutations_available) {
+      lines.push("- Candidate Project view mutations exist in the GraphQL schema, but automatic mutation is not implemented until the mutation contract is verified.");
+    } else {
+      lines.push("- No automatic Project view changes are available through GitHub CLI/GraphQL.");
+    }
     for (const view of projectViewInspection.filter((candidate) => candidate.status === "missing")) {
       lines.push(`- manual create: ${view.name}`);
     }
@@ -695,7 +743,7 @@ export function renderGitHubBootstrapReport({
   lines.push("", "## Notes", "");
   lines.push("- Project creation is allowed only with `--apply --create-project` and no existing configured Project reference.");
   lines.push("- Project fields are dry-run-first and are created only with `--apply --create-project-fields`.");
-  lines.push("- Project views are inspected through GraphQL when available; creation and renaming remain manual because GitHub CLI/GraphQL do not expose ProjectV2 view mutations.");
+  lines.push("- Project views are inspected through GraphQL when available; creation and renaming remain manual unless the live GraphQL schema exposes a verified ProjectV2 view mutation contract.");
   lines.push("- Tracker Drift is reported for canonical label mismatches and never auto-corrected.");
 
   return `${lines.join("\n")}\n`;
@@ -742,6 +790,7 @@ export async function createGitHubBootstrapReport(config, options = {}) {
   const projectFieldInspection = hasProjectFieldInspection || options.createProject ? inspectProjectFields(allProjectFields, options.existingProjectFields || []) : [];
   const hasProjectViewInspection = Object.hasOwn(options, "existingProjectViews");
   const projectViewInspection = hasProjectViewInspection ? inspectProjectViews(config.projectSchema?.recommendedViews || [], options.existingProjectViews || []) : [];
+  const projectViewMutationCapability = options.projectViewMutationCapability || inspectProjectViewMutationCapability(options.graphqlMutationNames);
   const owner = options.repository?.owner || config.github?.owner || "";
   const title = projectTitle(config, options);
   const projectCreateCommand = planProjectCreateCommand({ owner, title });
@@ -782,6 +831,7 @@ export async function createGitHubBootstrapReport(config, options = {}) {
     applyResults,
     projectCreateResult,
     projectFieldApplyResults,
+    projectViewMutationCapability,
     text: renderGitHubBootstrapReport({
       mode,
       gh: options.gh,
@@ -800,6 +850,7 @@ export async function createGitHubBootstrapReport(config, options = {}) {
       projectFieldInspection,
       projectViews: config.projectSchema?.recommendedViews || [],
       projectViewInspection,
+      projectViewMutationCapability,
       createCommands,
       projectFieldCreateCommands,
       applyResults,
