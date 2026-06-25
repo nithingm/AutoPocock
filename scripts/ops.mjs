@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { access, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +8,57 @@ import { createGitHubBootstrapReport } from "./lib/github-init.mjs";
 import { createMemoryProposal, writeMemoryProposalArtifact } from "./lib/memory-proposals.mjs";
 import { buildMirrorComment, renderMirrorPlan } from "./lib/artifact-mirror.mjs";
 import { classifyFeedback, renderFeedbackClassification } from "./lib/feedback-classifier.mjs";
+import {
+  approveContextArtifact,
+  latestArtifactPath,
+  renderContextArtifact,
+} from "./lib/context-plane.mjs";
+import { approvePrd } from "./lib/prd-plane.mjs";
+import {
+  applyQaDecision,
+  applyReviewDecision,
+  renderFollowUpBugArtifact,
+  renderGateDecisionArtifact,
+} from "./lib/review-plane.mjs";
+import { inspectSetupPlane, renderSetupPlaneReport } from "./lib/setup-plane.mjs";
+import {
+  buildProviderRunBundle,
+  buildRuntimeBlockedResult,
+  createProviderRunId,
+  executeCodexStub,
+  renderExecutionCompletionReport,
+} from "./lib/provider-runner.mjs";
+import {
+  buildLoopSpec,
+  deriveLoopSpecPath,
+  providerRunLifecycle,
+  reclaimDispatchArtifact,
+  validateClaimedDispatchForRun,
+} from "./lib/workflow-core.mjs";
+import {
+  applyRalphRunAction,
+  buildRalphRunSnapshot,
+  createRalphRunState,
+  defaultRalphRunStatePath,
+  renderRalphRunSnapshot,
+  validateRalphRunPlan,
+} from "./lib/ralph-runner.mjs";
+import {
+  approveWaveBundle,
+  buildWaveApprovalBundle,
+  defaultWaveApprovalArtifactPaths,
+  renderWaveApprovalBundle,
+} from "./lib/wave-approval-plane.mjs";
+import { getProvider } from "./lib/providers/index.mjs";
+import {
+  commandAvailable,
+  ensureDirectories,
+  ensureWorktreePath,
+  pathExists,
+  resolveRepoPath,
+  runCommand,
+} from "./lib/runtime-host.mjs";
+import { startWorkflowConsole } from "./lib/workflow-console.mjs";
 
 const execFileAsync = promisify(execFile);
 const cwd = process.cwd();
@@ -17,12 +68,18 @@ const help = `agentic-repo-template ops
 
 Usage:
   pnpm ops init
+  pnpm ops setup
+  pnpm ops context -- --title "Feature Name"
+  pnpm ops context-approve -- --context docs/agents/contexts/file.md --approved-by solo-operator
   pnpm ops prd -- --title "Feature Name"
+  pnpm ops prd-approve -- --prd docs/PRDs/file.md --approved-by solo-operator
   pnpm ops issues
   pnpm ops handoff -- --issue 123 --title "Implement slice"
   pnpm ops hitl -- --issue 123 --title "Provision API token"
   pnpm ops complete -- --issue 123 --status "needs human review"
   pnpm ops review-prep -- --issue 123 --pr 456
+  pnpm ops review-decision -- --dag issues/file.json --node node-1 --decision approve --approved-by solo-operator
+  pnpm ops qa-decision -- --dag issues/file.json --node node-1 --decision pass --approved-by solo-operator
   pnpm ops memory-propose -- --type workflow --title "Update workflow contract"
   pnpm ops mirror -- --artifact docs/agents/handoffs/file.md --issue 123
   pnpm ops feedback -- --issue 123 --pr 456 --finding "QA finding text"
@@ -36,8 +93,15 @@ Usage:
   pnpm ops schedule -- --queue .ai/queue.example.json
   pnpm ops github:init
   pnpm ops github:export
+  pnpm ops ralph -- --plan docs/agents/loop-specs/plan.json
+  pnpm ops ralph -- --plan docs/agents/loop-specs/plan.json --approve-wave wave-0 --approved-by solo-operator
   pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json
   pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --prepare-worktree
+  pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --execute
+  pnpm ops console -- --port 4173 --host 127.0.0.1
+  pnpm ops run-status -- --run .ai/provider-runs/provider-run-id.json
+  pnpm ops run-cancel -- --run .ai/provider-runs/provider-run-id.json --approved-by solo-operator --reason "No longer needed"
+  pnpm ops run-mirror -- --run .ai/provider-runs/provider-run-id.json --issue 23
 
 Guided Flow is the preferred UX. Manual Mode commands remain available as pnpm prd, pnpm issues, and pnpm qa.
 `;
@@ -64,6 +128,27 @@ function splitOptionList(value) {
     .split("|")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function parseAcceptanceEvidenceOption(value) {
+  return splitOptionList(value).map((item) => {
+    const [criterion, ...rest] = item.split("=>");
+    return {
+      criterion: String(criterion || "").trim(),
+      evidence: rest.join("=>").trim(),
+    };
+  }).filter((entry) => entry.criterion || entry.evidence);
+}
+
+function parseTestEvidenceOption(value) {
+  return splitOptionList(value).map((item) => {
+    const [dimension = "", status = "", ...summaryParts] = item.split(":");
+    return {
+      dimension: dimension.trim(),
+      status: status.trim(),
+      summary: summaryParts.join(":").trim(),
+    };
+  }).filter((entry) => entry.dimension || entry.status || entry.summary);
 }
 
 function slugify(value) {
@@ -97,6 +182,11 @@ function normalizeIssueRef(value) {
   return String(value || "").trim().replace(/^#/, "");
 }
 
+function formatIssueRef(value) {
+  const normalized = normalizeIssueRef(value);
+  return normalized ? `#${normalized}` : "";
+}
+
 function formatReviewPrepCommand(issue, completionPath = "") {
   const base = `pnpm ops review-prep -- --issue ${issue}`;
   return completionPath ? `${base} --completion ${completionPath}` : base;
@@ -119,6 +209,84 @@ function renderCompletionResolutionGuidance(resolution) {
     `Create one with: pnpm ops complete -- --issue ${resolution.issue} --status "needs human review"`,
     `Then re-run with: ${formatReviewPrepCommand(resolution.issue, "<path-to-completion-report.md>")}`,
   ].join("\n");
+}
+
+function renderExportIssueGuidance(issue, found) {
+  const issueRef = formatIssueRef(issue);
+  if (found) {
+    return `Requested issue ${issueRef} is present in the exported queue snapshot.`;
+  }
+
+  return [
+    `Requested issue ${issueRef} was not found in the exported queue snapshot.`,
+    `Attach issue ${issueRef} to the configured GitHub Project or verify the project reference before scheduling.`,
+    `Re-run the visibility check with: pnpm ops github:export -- --issue ${normalizeIssueRef(issue)}`,
+  ].join("\n");
+}
+
+function formatScheduleRerunCommand(queuePath, issue, shouldDispatch) {
+  const issueValue = normalizeIssueRef(issue);
+  return `pnpm ops schedule -- --queue ${queuePath}${shouldDispatch ? " --dispatch" : ""} --issue ${issueValue}`;
+}
+
+function formatManualDispatchRecovery(item, issue) {
+  const issueValue = normalizeIssueRef(issue);
+  const title = item?.title || "<title>";
+  return `pnpm ops dispatch -- --issue ${issueValue} --title "${title}" --source manual --override-reason "Solo Operator approved scheduler mismatch"`;
+}
+
+function renderSchedulerMismatchGuidance({ issue, queuePath, shouldDispatch, matchedItem, matchedDecision, dispatchedItems }) {
+  const issueRef = formatIssueRef(issue);
+  const lines = [`Requested issue ${issueRef} was not selected by this scheduler run.`];
+
+  if (matchedItem && matchedDecision) {
+    lines.push(`Current decision for ${issueRef}: ${matchedDecision.action.toUpperCase()} - ${matchedDecision.reason}`);
+    lines.push(`Fix that gating reason and rerun: ${formatScheduleRerunCommand(queuePath, issue, shouldDispatch)}`);
+    lines.push(`If you must proceed outside the scheduler, create a manual dispatch with: ${formatManualDispatchRecovery(matchedItem, issue)}`);
+    return lines.join("\n");
+  }
+
+  lines.push(`${issueRef} is not present in ${queuePath}.`);
+  lines.push(`Check project visibility with: pnpm ops github:export -- --issue ${normalizeIssueRef(issue)} --output ${queuePath}`);
+  if (dispatchedItems.length > 0) {
+    lines.push(`This run dispatched ${dispatchedItems.map((item) => item.id).join(", ")} instead. Stop and reconcile the active issue before claiming unrelated work.`);
+  }
+  return lines.join("\n");
+}
+
+function renderProviderRunMirrorComment({ metadata, issueRef, providerRunPath }) {
+  const lines = [
+    `Provider Run update for \`${metadata.run_id}\``,
+    "",
+    `- Issue: ${issueRef}`,
+    `- Status: ${metadata.status}`,
+    `- Lifecycle: ${providerRunLifecycle(metadata.status)}`,
+    `- Provider: ${metadata.provider} (${metadata.adapter_mode})`,
+    `- Dispatch: ${metadata.dispatch_id}`,
+    `- Started: ${metadata.started_at || "N/A"}`,
+    `- Completed: ${metadata.completed_at || "N/A"}`,
+    `- Completion report: ${metadata.completion_report_target || "N/A"}`,
+    `- Provider Run metadata: ${providerRunPath}`,
+    `- Loop Spec: ${metadata.loop_spec_path || "N/A"}`,
+  ];
+
+  if (metadata.worker?.pid) {
+    lines.push(`- Worker PID: ${metadata.worker.pid}`);
+  }
+  if (metadata.result?.summary) {
+    lines.push(`- Summary: ${metadata.result.summary}`);
+  }
+  if (Array.isArray(metadata.result?.follow_ups) && metadata.result.follow_ups.length > 0) {
+    lines.push(`- Follow-up: ${metadata.result.follow_ups.join(" | ")}`);
+  }
+  if (metadata.cancelled?.reason) {
+    lines.push(`- Cancellation reason: ${metadata.cancelled.reason}`);
+  }
+
+  return {
+    target: `issue #${issueRef}`,
+    body: lines.join("\n"),
+  };
 }
 
 function removeOption(args, name) {
@@ -266,50 +434,104 @@ async function runNodeScript(script, args) {
   process.stderr.write(result.stderr);
 }
 
-async function runCommand(command, args) {
-  return execFileAsync(command, args, {
-    cwd,
-    windowsHide: true,
-    maxBuffer: 1024 * 1024,
-  });
-}
+async function killProcessTree(pid) {
+  if (!Number.isFinite(pid) || pid <= 0) {
+    throw new Error(`Invalid PID: ${pid}`);
+  }
 
-async function commandAvailable(command, args = ["--version"]) {
+  if (process.platform === "win32") {
+    await execFileAsync("taskkill", ["/PID", String(pid), "/T", "/F"], {
+      cwd,
+      windowsHide: true,
+      maxBuffer: 1024 * 1024,
+      env: process.env,
+    });
+    return;
+  }
+
   try {
-    const result = await runCommand(command, args);
-    return { available: true, stdout: result.stdout.trim(), stderr: result.stderr.trim() };
-  } catch (error) {
-    return {
-      available: false,
-      stdout: `${error.stdout || ""}`.trim(),
-      stderr: `${error.stderr || error.message || ""}`.trim(),
-    };
+    process.kill(-pid, "SIGTERM");
+  } catch {
+    process.kill(pid, "SIGTERM");
   }
 }
 
 async function ensureInitStructure() {
-  const dirs = [
-    "docs/PRDs",
-    "docs/QA",
-    "docs/adr",
-    "docs/agents/handoffs",
-    "docs/agents/hitl",
-    "docs/agents/completions",
-    "docs/agents/reviews",
-    "docs/agents/memory-proposals",
-    "docs/agents/feedback",
-    "docs/agents/schedules",
-    "docs/agents/dispatches",
-    "issues",
-    ".github/ISSUE_TEMPLATE",
-    ".ai/prompts",
-    ".ai/memory",
-    "skills/engineering/agentic-ops",
-    "skills/engineering/subagent-handoff",
-  ];
-
-  await Promise.all(dirs.map((dir) => mkdir(path.join(cwd, dir), { recursive: true })));
+  await ensureDirectories(cwd);
   process.stdout.write("Workflow structure is initialized. No workers or automations were started.\n");
+}
+
+async function setupPlane(args) {
+  const applyInit = args.includes("--apply-init");
+  const config = await loadJson(".ai/ops.config.json");
+  const report = await inspectSetupPlane({
+    cwd,
+    config,
+    commandAvailable,
+    loadJson,
+    applyInit,
+  });
+  process.stdout.write(renderSetupPlaneReport(report));
+}
+
+async function contextCommand(args) {
+  const title = readOption(args, "title") || "Untitled Context";
+  const source = readOption(args, "source", "manual");
+  const contextPath = path.join(cwd, "CONTEXT.md");
+  const contextMarkdown = (await pathExists(contextPath)) ? await readFile(contextPath, "utf8") : "";
+  await writeArtifact("context", renderContextArtifact({ title, source, contextMarkdown }), args);
+}
+
+async function contextApproveCommand(args) {
+  const contextArg = readOption(args, "context");
+  const approvedBy = readOption(args, "approved-by");
+  if (!approvedBy) {
+    throw new Error("context-approve requires --approved-by.");
+  }
+
+  let target = contextArg ? (path.isAbsolute(contextArg) ? contextArg : path.join(cwd, contextArg)) : "";
+  if (!target) {
+    const contextDir = path.join(cwd, "docs", "agents", "contexts");
+    const files = await readdir(contextDir).catch(() => []);
+    target = latestArtifactPath(cwd, path.join("docs", "agents", "contexts"), files);
+  }
+  if (!target || !(await pathExists(target))) {
+    throw new Error("Context artifact not found. Run `pnpm ops context -- --title \"Feature Name\"` first or pass --context.");
+  }
+
+  const markdown = await readFile(target, "utf8");
+  const approved = approveContextArtifact(markdown, {
+    approvedBy,
+    approvedAt: nowIso(),
+  });
+  await writeFile(target, approved, "utf8");
+  process.stdout.write(`${target}\n`);
+}
+
+async function prdApproveCommand(args) {
+  const prdArg = readOption(args, "prd");
+  const approvedBy = readOption(args, "approved-by");
+  if (!approvedBy) {
+    throw new Error("prd-approve requires --approved-by.");
+  }
+
+  let target = prdArg ? (path.isAbsolute(prdArg) ? prdArg : path.join(cwd, prdArg)) : "";
+  if (!target) {
+    const prdDir = path.join(cwd, "docs", "PRDs");
+    const files = await readdir(prdDir).catch(() => []);
+    target = latestArtifactPath(cwd, path.join("docs", "PRDs"), files);
+  }
+  if (!target || !(await pathExists(target))) {
+    throw new Error("PRD artifact not found. Run `pnpm ops prd -- --context <approved-context.md>` first or pass --prd.");
+  }
+
+  const markdown = await readFile(target, "utf8");
+  const approved = approvePrd(markdown, {
+    approvedBy,
+    approvedAt: nowIso(),
+  });
+  await writeFile(target, approved, "utf8");
+  process.stdout.write(`${target}\n`);
 }
 
 function handoffMarkdown({ issue, title }) {
@@ -522,6 +744,25 @@ async function findLatestHandoff(issue) {
   return findLatestFile(path.join("docs", "agents", "handoffs"), issue);
 }
 
+function issueFilenameTokens(issue) {
+  const rawIssue = String(issue || "").trim();
+  const normalizedIssue = normalizeIssueRef(issue);
+  return [...new Set([rawIssue, normalizedIssue, normalizedIssue ? `#${normalizedIssue}` : ""])].filter(Boolean);
+}
+
+function fileMatchesIssueToken(file, issue) {
+  const target = String(file || "").toLowerCase();
+  const tokens = issueFilenameTokens(issue);
+  if (tokens.length === 0) {
+    return false;
+  }
+
+  return tokens.some((token) => {
+    const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`(^|[^a-z0-9])${escaped.toLowerCase()}([^a-z0-9]|$)`).test(target);
+  });
+}
+
 async function findLatestFile(dir, needle) {
   const targetDir = path.join(cwd, dir);
   let files = [];
@@ -544,6 +785,65 @@ async function findLatestFile(dir, needle) {
     .reverse()[0];
 
   return match ? path.join(targetDir, match) : "";
+}
+
+async function findExactIssueFiles(dir, issue) {
+  const targetDir = path.join(cwd, dir);
+  let files = [];
+
+  try {
+    files = await readdir(targetDir);
+  } catch {
+    return [];
+  }
+
+  return files
+    .filter((file) => file.endsWith(".md") && fileMatchesIssueToken(file, issue))
+    .sort()
+    .reverse()
+    .map((file) => path.join(targetDir, file));
+}
+
+function manualDispatchHandoffResolutionMessage(issue, candidates = []) {
+  const normalizedIssue = normalizeIssueRef(issue);
+  const lines = [
+    `Manual dispatch requires a matching handoff artifact for issue ${normalizedIssue}.`,
+    `Create one with: pnpm ops handoff -- --issue ${normalizedIssue} --title "Implement slice"`,
+  ];
+
+  if (candidates.length > 1) {
+    lines.push("Multiple exact handoff artifacts matched this issue. Re-run dispatch with one of:");
+    lines.push(...candidates.map((candidate) => `- --handoff ${candidate}`));
+  } else {
+    lines.push("Or re-run dispatch with: --handoff <exact-path-to-handoff.md>");
+  }
+
+  return lines.join("\n");
+}
+
+async function resolveManualDispatchHandoff(issue, handoffPath = "") {
+  if (handoffPath) {
+    const resolvedPath = path.isAbsolute(handoffPath) ? handoffPath : path.join(cwd, handoffPath);
+
+    try {
+      await access(resolvedPath);
+    } catch {
+      throw new Error(`Manual dispatch handoff not found: ${handoffPath}`);
+    }
+
+    if (!fileMatchesIssueToken(path.basename(resolvedPath), issue)) {
+      throw new Error(`Manual dispatch handoff does not match issue ${normalizeIssueRef(issue)}: ${resolvedPath}`);
+    }
+
+    return resolvedPath;
+  }
+
+  const candidates = await findExactIssueFiles(path.join("docs", "agents", "handoffs"), issue);
+  if (candidates.length !== 1) {
+    throw new Error(manualDispatchHandoffResolutionMessage(issue, candidates));
+  }
+
+  return candidates[0];
 }
 
 async function resolveCompletionReportFromIssue(issue) {
@@ -625,6 +925,7 @@ async function writeArtifact(kind, content, args) {
   const date = new Date().toISOString().slice(0, 10);
   const slug = slugify(`${issue}-${title || status || kind}`) || kind;
   const dirs = {
+    context: "docs/agents/contexts",
     handoff: "docs/agents/handoffs",
     completion: "docs/agents/completions",
     hitl: "docs/agents/hitl",
@@ -636,6 +937,134 @@ async function writeArtifact(kind, content, args) {
   await mkdir(path.join(cwd, dir), { recursive: true });
   await writeFile(target, content, "utf8");
   process.stdout.write(`${target}\n`);
+}
+
+async function writeNamedArtifact(relativeDir, filename, content) {
+  const target = path.join(cwd, relativeDir, filename);
+  await mkdir(path.dirname(target), { recursive: true });
+  await writeFile(target, content, "utf8");
+  return target;
+}
+
+async function resolveDagPath(args) {
+  const dag = readOption(args, "dag");
+  if (!dag) {
+    throw new Error("Command requires --dag.");
+  }
+
+  const fullPath = path.isAbsolute(dag) ? dag : path.join(cwd, dag);
+  if (!(await pathExists(fullPath))) {
+    throw new Error(`DAG artifact not found: ${dag}`);
+  }
+
+  return fullPath;
+}
+
+async function reviewDecisionCommand(args) {
+  const dagPath = await resolveDagPath(args);
+  const nodeId = readOption(args, "node");
+  const decision = readOption(args, "decision");
+  const approvedBy = readOption(args, "approved-by");
+  const reason = readOption(args, "reason");
+  const issue = readOption(args, "issue", "local");
+
+  if (!nodeId) {
+    throw new Error("review-decision requires --node.");
+  }
+
+  const dag = JSON.parse(await readFile(dagPath, "utf8"));
+  const updated = applyReviewDecision(dag, {
+    nodeId,
+    decision,
+    approvedBy,
+    reason,
+  });
+  await writeFile(dagPath, `${JSON.stringify(updated, null, 2)}\n`, "utf8");
+
+  const date = new Date().toISOString().slice(0, 10);
+  const artifactPath = await writeNamedArtifact(
+    path.join("docs", "agents", "reviews"),
+    `${date}-${slugify(`${issue}-${nodeId}-${decision}-review`)}.md`,
+    renderGateDecisionArtifact({
+      kind: "review",
+      issue,
+      nodeId,
+      decision,
+      approvedBy,
+      reason,
+      dagPath,
+    }),
+  );
+
+  process.stdout.write(`${dagPath}\n${artifactPath}\n`);
+}
+
+async function qaDecisionCommand(args) {
+  const dagPath = await resolveDagPath(args);
+  const nodeId = readOption(args, "node");
+  const decision = readOption(args, "decision");
+  const approvedBy = readOption(args, "approved-by");
+  const reason = readOption(args, "reason");
+  const issue = readOption(args, "issue", "local");
+
+  if (!nodeId) {
+    throw new Error("qa-decision requires --node.");
+  }
+
+  const dag = JSON.parse(await readFile(dagPath, "utf8"));
+  const updated = applyQaDecision(dag, {
+    nodeId,
+    decision,
+    approvedBy,
+    reason,
+    evidence: {
+      changed_outputs: splitOptionList(readOption(args, "changed-outputs")),
+      verification_commands: splitOptionList(readOption(args, "verification-commands")),
+      verification_results: splitOptionList(readOption(args, "verification-results")),
+      acceptance_criteria_evidence: parseAcceptanceEvidenceOption(readOption(args, "acceptance-evidence")),
+      test_evidence: parseTestEvidenceOption(readOption(args, "test-evidence")),
+    },
+  });
+  await writeFile(dagPath, `${JSON.stringify(updated, null, 2)}\n`, "utf8");
+
+  const date = new Date().toISOString().slice(0, 10);
+  const artifactPath = await writeNamedArtifact(
+    path.join("docs", "QA"),
+    `${date}-${slugify(`${issue}-${nodeId}-${decision}-qa`)}.md`,
+    renderGateDecisionArtifact({
+      kind: "qa",
+      issue,
+      nodeId,
+      decision,
+      approvedBy,
+      reason,
+      dagPath,
+      evidenceSummary: readOption(args, "verification-results"),
+    }),
+  );
+
+  process.stdout.write(`${dagPath}\n${artifactPath}\n`);
+
+  if (decision === "fail") {
+    const followUp = renderFollowUpBugArtifact({
+      issue,
+      nodeId,
+      approvedBy,
+      reason,
+    });
+    const bugBase = `${date}-${slugify(`${issue}-${nodeId}-follow-up-bug`)}`;
+    const jsonPath = await writeNamedArtifact(
+      path.join("docs", "agents", "feedback"),
+      `${bugBase}.json`,
+      `${JSON.stringify(followUp.json, null, 2)}\n`,
+    );
+    const markdownPath = await writeNamedArtifact(
+      path.join("docs", "agents", "feedback"),
+      `${bugBase}.md`,
+      followUp.markdown,
+    );
+    process.stdout.write(`${jsonPath}\n${markdownPath}\n`);
+  }
 }
 
 async function printBoard() {
@@ -860,6 +1289,7 @@ async function gitHubExport(args) {
   const project = configuredProjectRef(config, args);
   const input = readOption(args, "input");
   const output = readOption(args, "output", config.queueFile || ".ai/queue.json");
+  const requestedIssue = readOption(args, "issue");
 
   if (!hasProjectReference(project) && !input) {
     throw new Error("GitHub project reference is required. Set github.projectUrl, github.projectId, or github.projectNumber in .ai/ops.config.json, or pass --project-url/--project-id/--project-number.");
@@ -911,21 +1341,127 @@ async function gitHubExport(args) {
 
   process.stdout.write(`${outputPath}\n`);
   process.stdout.write(`Exported ${queue.length} non-Done item(s).\n`);
-}
-
-async function pathExists(filePath) {
-  try {
-    await access(filePath);
-    return true;
-  } catch {
-    return false;
+  if (requestedIssue) {
+    const requestedIssueRef = normalizeIssueRef(requestedIssue);
+    const found = queue.some((item) => normalizeIssueRef(item.id) === requestedIssueRef);
+    process.stdout.write(`${renderExportIssueGuidance(requestedIssue, found)}\n`);
   }
 }
 
 async function loadJson(relativePath) {
-  const fullPath = path.isAbsolute(relativePath) ? relativePath : path.join(cwd, relativePath);
+  const fullPath = resolveRepoPath(cwd, relativePath);
   const contents = await readFile(fullPath, "utf8");
   return JSON.parse(contents);
+}
+
+async function ralphCommand(args) {
+  const planArg = readOption(args, "plan");
+  if (!planArg) {
+    throw new Error("ralph requires --plan.");
+  }
+
+  const planPath = path.isAbsolute(planArg) ? planArg : path.join(cwd, planArg);
+  if (!(await pathExists(planPath))) {
+    throw new Error(`Ralph run plan not found: ${planArg}`);
+  }
+
+  const plan = JSON.parse(await readFile(planPath, "utf8"));
+  const errors = validateRalphRunPlan(plan);
+  if (errors.length > 0) {
+    throw new Error(errors.join("\n"));
+  }
+
+  const stateArg = readOption(args, "state");
+  const statePath = stateArg
+    ? (path.isAbsolute(stateArg) ? stateArg : path.join(cwd, stateArg))
+    : defaultRalphRunStatePath({ cwd, plan, planPath });
+
+  let state;
+  if (await pathExists(statePath)) {
+    state = JSON.parse(await readFile(statePath, "utf8"));
+  } else {
+    state = createRalphRunState(plan, {
+      source_plan: planPath,
+    });
+  }
+
+  let action = { kind: "status" };
+
+  const actor = readOption(args, "actor", "solo-operator");
+  if (args.includes("--start")) {
+    action = { kind: "start", issue_id: readOption(args, "start"), reason: readOption(args, "reason"), actor };
+  } else if (args.includes("--complete")) {
+    action = { kind: "complete", issue_id: readOption(args, "complete"), reason: readOption(args, "reason"), actor };
+  } else if (args.includes("--block")) {
+    action = { kind: "block", issue_id: readOption(args, "block"), reason: readOption(args, "reason"), actor };
+  } else if (args.includes("--resume")) {
+    action = { kind: "resume", issue_id: readOption(args, "resume"), reason: readOption(args, "reason"), actor };
+  } else if (args.includes("--reset")) {
+    action = { kind: "reset", issue_id: readOption(args, "reset"), reason: readOption(args, "reason"), actor };
+  } else if (args.includes("--approve-wave")) {
+    const waveId = readOption(args, "approve-wave");
+    const approvedBy = readOption(args, "approved-by");
+    if (!waveId) {
+      throw new Error("ralph --approve-wave requires a wave id.");
+    }
+    if (!approvedBy) {
+      throw new Error("ralph --approve-wave requires --approved-by.");
+    }
+    action = { kind: "approve_wave", wave_id: waveId, reason: readOption(args, "reason"), actor: approvedBy };
+  } else if (args.includes("--freeze")) {
+    action = { kind: "freeze", reason: readOption(args, "reason"), actor };
+  } else if (args.includes("--unfreeze")) {
+    action = { kind: "unfreeze", reason: readOption(args, "reason"), actor };
+  }
+
+  const targetWaveId = action.kind === "approve_wave" ? action.wave_id : "";
+  if (action.kind === "approve_wave") {
+    const draftBundle = buildWaveApprovalBundle({
+      plan,
+      state,
+      waveId: targetWaveId,
+      sourcePlanPath: planPath,
+    });
+    const wave = plan.waves.find((entry) => entry.wave_id === targetWaveId);
+    const artifactPaths = defaultWaveApprovalArtifactPaths({ cwd, plan, wave });
+    const approvedBundle = approveWaveBundle(draftBundle, {
+      approvedBy: action.actor,
+    });
+    await mkdir(path.dirname(artifactPaths.json), { recursive: true });
+    await writeFile(artifactPaths.json, `${JSON.stringify(approvedBundle, null, 2)}\n`, "utf8");
+    await writeFile(artifactPaths.markdown, renderWaveApprovalBundle(approvedBundle), "utf8");
+    action.bundle_json_path = artifactPaths.json;
+    action.bundle_markdown_path = artifactPaths.markdown;
+  }
+
+  state = applyRalphRunAction(plan, state, action);
+
+  const currentWave = buildRalphRunSnapshot(plan, state).current_wave;
+  if (currentWave) {
+    const wave = plan.waves.find((entry) => entry.wave_id === currentWave.wave_id);
+    const artifactPaths = defaultWaveApprovalArtifactPaths({ cwd, plan, wave });
+    const bundle = buildWaveApprovalBundle({
+      plan,
+      state,
+      waveId: currentWave.wave_id,
+      sourcePlanPath: planPath,
+    });
+    await mkdir(path.dirname(artifactPaths.json), { recursive: true });
+    await writeFile(artifactPaths.json, `${JSON.stringify(bundle, null, 2)}\n`, "utf8");
+    await writeFile(artifactPaths.markdown, renderWaveApprovalBundle(bundle), "utf8");
+    state.wave_approvals[currentWave.wave_id] = {
+      ...state.wave_approvals[currentWave.wave_id],
+      bundle_json_path: artifactPaths.json,
+      bundle_markdown_path: artifactPaths.markdown,
+    };
+  }
+
+  await mkdir(path.dirname(statePath), { recursive: true });
+  await writeFile(statePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+
+  const snapshot = buildRalphRunSnapshot(plan, state);
+  process.stdout.write(`${statePath}\n`);
+  process.stdout.write(renderRalphRunSnapshot(plan, state, snapshot));
 }
 
 function hasLabel(item, label) {
@@ -994,6 +1530,7 @@ async function schedule(args) {
   const queuePath = readOption(args, "queue", config.queueFile || ".ai/queue.json");
   const capacityOverride = readOption(args, "review-capacity");
   const shouldDispatch = args.includes("--dispatch");
+  const requestedIssue = readOption(args, "issue");
   const queueFullPath = path.isAbsolute(queuePath) ? queuePath : path.join(cwd, queuePath);
 
   if (!(await pathExists(queueFullPath))) {
@@ -1037,6 +1574,25 @@ async function schedule(args) {
 
   process.stdout.write(plan);
   process.stdout.write(`\nSaved scheduler plan: ${target}\n`);
+
+  if (requestedIssue) {
+    const requestedIssueRef = normalizeIssueRef(requestedIssue);
+    const matched = decisions.find(({ item }) => normalizeIssueRef(item.id) === requestedIssueRef);
+    const dispatchedItems = decisions.filter(({ decision }) => decision.action === "dispatch").map(({ item }) => item);
+    const isRequestedDispatched = matched?.decision?.action === "dispatch";
+    if (!isRequestedDispatched) {
+      process.stdout.write(
+        `${renderSchedulerMismatchGuidance({
+          issue: requestedIssue,
+          queuePath,
+          shouldDispatch,
+          matchedItem: matched?.item,
+          matchedDecision: matched?.decision,
+          dispatchedItems,
+        })}\n`,
+      );
+    }
+  }
 
   if (!shouldDispatch) {
     return;
@@ -1090,6 +1646,7 @@ function dispatchMarkdown(dispatch) {
 ## Links
 
 - Handoff artifact: ${dispatch.handoff_artifact || "TBD"}
+- Loop Spec target: ${dispatch.loop_spec_target || "TBD"}
 - Completion report target: ${dispatch.completion_report_target}
 - Scheduler plan: ${dispatch.created_from_scheduler_plan || "TBD"}
 
@@ -1135,7 +1692,10 @@ async function createDispatchArtifact({
     throw new Error("Scheduler-sourced dispatch requires --plan.");
   }
 
-  const resolvedHandoff = handoff || (issue ? await findLatestHandoff(issue) : "");
+  const resolvedHandoff =
+    source === "manual"
+      ? await resolveManualDispatchHandoff(issue, handoff)
+      : handoff || (issue ? await findLatestHandoff(issue) : "");
 
   const timestamp = nowForFile();
   const dispatchId = `dispatch-${timestamp}-${slugify(issue)}`;
@@ -1143,6 +1703,7 @@ async function createDispatchArtifact({
   const jsonTarget = path.join(dir, `${dispatchId}.json`);
   const mdTarget = path.join(dir, `${dispatchId}.md`);
   const completionTarget = path.join(cwd, "docs", "agents", "completions", `${dispatchId}-completion.md`);
+  const loopSpecTarget = path.join(cwd, "docs", "agents", "loop-specs", `${dispatchId}-loop-spec.json`);
   const worktreePath = isolationMode === "worktree" ? deriveWorktreePath(issue, title) : "";
 
   const artifact = {
@@ -1157,6 +1718,7 @@ async function createDispatchArtifact({
     expected_branch: `agent/${slugify(issue)}-${slugify(title)}`,
     worktree_path: worktreePath,
     handoff_artifact: resolvedHandoff,
+    loop_spec_target: loopSpecTarget,
     completion_report_target: completionTarget,
     allowed_commands: ["run relevant tests", "update completion report"],
     forbidden_actions: ["merge PR", "change durable memory without approval", "handle secrets", "make unrelated dependency changes"],
@@ -1292,42 +1854,25 @@ async function reclaim(args) {
     age_hours_at_reclaim: inspection.ageHours == null ? null : Number(inspection.ageHours.toFixed(2)),
   };
 
-  artifact.claim_history = Array.isArray(artifact.claim_history) ? artifact.claim_history : [];
-  artifact.claim_history.push(historyEntry);
-  artifact.claim = null;
-  artifact.status = "queued";
+  const reclaimed = reclaimDispatchArtifact(artifact, historyEntry);
 
-  await writeFile(fullPath, `${JSON.stringify(artifact, null, 2)}\n`, "utf8");
+  await writeFile(fullPath, `${JSON.stringify(reclaimed, null, 2)}\n`, "utf8");
   process.stdout.write(`${fullPath}\n`);
   process.stdout.write(`Reclaimed by ${approvedBy}. Dispatch returned to queued.\n`);
 }
 
 async function runDispatch(args) {
   const prepareWorktree = args.includes("--prepare-worktree");
+  const execute = args.includes("--execute");
+  const liveProvider = args.includes("--live-provider");
+  const detach = args.includes("--detach");
+  const stubResult = readOption(args, "stub-result", "success");
+  const providerTimeoutMs = Number.parseInt(readOption(args, "provider-timeout-ms", "45000"), 10);
   const { artifact } = await resolveDispatchArtifact(args, { command: "run", status: "claimed" });
 
-  if (artifact.status !== "claimed") {
-    throw new Error(`Dispatch ${artifact.dispatch_id} is ${artifact.status}, not claimed.`);
-  }
-
-  if (!artifact.claim?.claimed_by || !artifact.claim?.claimed_at || !artifact.claim?.isolation_mode) {
-    throw new Error("Claimed dispatch is missing claimed_by, claimed_at, or isolation_mode.");
-  }
-
-  if (!artifact.isolation_mode) {
-    throw new Error("Dispatch is missing isolation_mode.");
-  }
-
-  if (artifact.claim.isolation_mode !== artifact.isolation_mode) {
-    throw new Error("Claimed dispatch isolation mode does not match dispatch isolation_mode.");
-  }
-
-  if (artifact.isolation_mode === "worktree" && !artifact.worktree_path) {
-    throw new Error("Worktree dispatch is missing worktree_path.");
-  }
-
-  if (!Array.isArray(artifact.forbidden_actions) || artifact.forbidden_actions.length === 0) {
-    throw new Error("Dispatch is missing forbidden_actions.");
+  const runValidationErrors = validateClaimedDispatchForRun(artifact);
+  if (runValidationErrors.length > 0) {
+    throw new Error(runValidationErrors[0]);
   }
 
   if (prepareWorktree) {
@@ -1336,6 +1881,340 @@ async function runDispatch(args) {
     }
 
     await mkdir(artifact.worktree_path, { recursive: true });
+  }
+
+  let executionSummary = "";
+  if (execute) {
+    if (detach && !liveProvider) {
+      throw new Error("run -- --execute --detach currently requires --live-provider.");
+    }
+    const provider = readOption(args, "provider", "codex");
+    const providerAdapter = getProvider(provider, { commandAvailable, cwd });
+    const runId = createProviderRunId(artifact.dispatch_id, nowIso());
+    const providerRunDir = path.join(cwd, ".ai", "provider-runs");
+    const loopSpecPath = deriveLoopSpecPath({
+      cwd,
+      dispatchId: artifact.dispatch_id,
+      loopSpecPath: artifact.loop_spec_target,
+    });
+    const bundlePath = path.join(providerRunDir, `${runId}-bundle.json`);
+    const metadataPath = path.join(providerRunDir, `${runId}.json`);
+    const lastMessagePath = path.join(providerRunDir, `${runId}-last-message.txt`);
+    const stdoutLogPath = path.join(providerRunDir, `${runId}.stdout.log`);
+    const stderrLogPath = path.join(providerRunDir, `${runId}.stderr.log`);
+    await mkdir(providerRunDir, { recursive: true });
+    await mkdir(path.dirname(loopSpecPath), { recursive: true });
+    let handoffMarkdown = "";
+    if (artifact.handoff_artifact && (await pathExists(artifact.handoff_artifact))) {
+      handoffMarkdown = await readFile(artifact.handoff_artifact, "utf8");
+    }
+    const loopSpec = buildLoopSpec({
+      dispatch: artifact,
+      handoffMarkdown,
+    });
+    const bundle = buildProviderRunBundle({
+      dispatch: artifact,
+      loopSpec,
+      provider,
+      loopSpecPath,
+    });
+    let result;
+    let providerRunStatus;
+    let adapterMode;
+    let commandStdout = "";
+    let commandStderr = "";
+    let runtimeState = {
+      stop_condition: "",
+      escalation_reason: "",
+      isolation_prepared: artifact.isolation_mode !== "worktree",
+      log_paths: {
+        stdout: stdoutLogPath,
+        stderr: stderrLogPath,
+      },
+    };
+
+    if (artifact.isolation_mode === "worktree" && artifact.worktree_path) {
+      await ensureWorktreePath(artifact.worktree_path);
+      runtimeState.isolation_prepared = true;
+    }
+
+    if (!artifact.handoff_artifact || !(await pathExists(artifact.handoff_artifact))) {
+      const blocked = buildRuntimeBlockedResult({
+        bundle,
+        verificationCommand: "pnpm ops run -- --dispatch <dispatch> --execute",
+        summary: "Execution stopped before provider launch because the required handoff artifact was missing.",
+        gap: `Missing handoff artifact: ${artifact.handoff_artifact || "unset"}`,
+        stopCondition: "required context artifact missing",
+        escalationReason: "Restore the handoff artifact or regenerate the Context Handoff before retrying execution.",
+      });
+      result = blocked.result;
+      providerRunStatus = blocked.providerRunStatus;
+      adapterMode = liveProvider ? "live" : "stub";
+      runtimeState = {
+        ...runtimeState,
+        ...blocked.runtime,
+      };
+    } else if (artifact.isolation_mode === "worktree" && !runtimeState.isolation_prepared) {
+      const blocked = buildRuntimeBlockedResult({
+        bundle,
+        verificationCommand: "pnpm ops run -- --dispatch <dispatch> --execute",
+        summary: "Execution stopped before provider launch because the worktree isolation path could not be prepared.",
+        gap: `Worktree path not prepared: ${artifact.worktree_path || "unset"}`,
+        stopCondition: "owned file boundary exceeded",
+        escalationReason: "Prepare or repair the worktree path before retrying execution.",
+      });
+      result = blocked.result;
+      providerRunStatus = blocked.providerRunStatus;
+      adapterMode = liveProvider ? "live" : "stub";
+      runtimeState = {
+        ...runtimeState,
+        ...blocked.runtime,
+      };
+    } else if ((bundle.execution.stop_conditions || []).length === 0 || (bundle.execution.escalation_rules || []).length === 0) {
+      const blocked = buildRuntimeBlockedResult({
+        bundle,
+        verificationCommand: "pnpm ops run -- --dispatch <dispatch> --execute",
+        summary: "Execution stopped before provider launch because the Loop Spec was missing enforced stop or escalation rules.",
+        gap: "Loop Spec execution contract was incomplete.",
+        stopCondition: "required context artifact missing",
+        escalationReason: "Regenerate the Loop Spec so execution stop and escalation rules are explicit before retrying.",
+      });
+      result = blocked.result;
+      providerRunStatus = blocked.providerRunStatus;
+      adapterMode = liveProvider ? "live" : "stub";
+      runtimeState = {
+        ...runtimeState,
+        ...blocked.runtime,
+      };
+    }
+
+    if (!result && liveProvider) {
+      if (detach) {
+        const readiness = await providerAdapter.isAvailable({ requireLogin: true });
+        if (!readiness.available) {
+          throw new Error(`${provider} CLI is required for run -- --execute --live-provider --detach.`);
+        }
+        if (!readiness.ready) {
+          throw new Error(`${provider} login is required for run -- --execute --live-provider --detach.`);
+        }
+
+        const workerArgs = [
+          path.join(scriptDir, "provider-run-worker.mjs"),
+          "--metadata",
+          metadataPath,
+          "--provider-timeout-ms",
+          String(Number.isFinite(providerTimeoutMs) ? providerTimeoutMs : 45000),
+        ];
+
+        const worker = spawn(process.execPath, workerArgs, {
+          cwd,
+          detached: true,
+          stdio: "ignore",
+          windowsHide: true,
+          env: process.env,
+        });
+        worker.unref();
+
+        const providerRun = {
+          run_id: runId,
+          provider,
+          adapter_mode: "live-detached",
+          dispatch_id: artifact.dispatch_id,
+          issue_id: artifact.issue_id,
+          status: "running",
+          started_at: nowIso(),
+          completed_at: "",
+          handoff_artifact: artifact.handoff_artifact,
+          loop_spec_path: loopSpecPath,
+          bundle_path: bundlePath,
+          last_message_path: lastMessagePath,
+          stdout_log_path: stdoutLogPath,
+          stderr_log_path: stderrLogPath,
+          completion_report_target: artifact.completion_report_target,
+          claim: artifact.claim,
+          execution: bundle.execution,
+          runtime: runtimeState,
+          worker: {
+            pid: worker.pid,
+            command: process.execPath,
+            args: workerArgs,
+          },
+          result: {
+            summary: "Detached Codex execution launched.",
+            follow_ups: ["Use `pnpm ops run-status` to inspect or finalize the run outcome."],
+            gaps: [],
+          },
+        };
+
+        await writeFile(loopSpecPath, `${JSON.stringify(loopSpec, null, 2)}\n`, "utf8");
+        await writeFile(bundlePath, `${JSON.stringify(bundle, null, 2)}\n`, "utf8");
+        await writeFile(metadataPath, `${JSON.stringify(providerRun, null, 2)}\n`, "utf8");
+
+        const lines = [
+          "# Runner Plan",
+          "",
+          `Dispatch: ${artifact.dispatch_id}`,
+          `Claimed by: ${artifact.claim.claimed_by}`,
+          `Claimed at: ${artifact.claim.claimed_at}`,
+          `Isolation mode: ${artifact.claim.isolation_mode}`,
+          `Expected branch: ${artifact.expected_branch || "TBD"}`,
+          `Worktree path: ${artifact.worktree_path || "N/A"}`,
+          `Worktree prepared: ${prepareWorktree ? "yes" : "no"}`,
+          `Handoff artifact: ${artifact.handoff_artifact || "TBD"}`,
+          `Loop Spec: ${loopSpecPath}`,
+          `Completion report target: ${artifact.completion_report_target || "TBD"}`,
+          "",
+          "Forbidden actions:",
+          ...artifact.forbidden_actions.map((action) => `- ${action}`),
+          "",
+          "Detached live Codex execution launched. Use `pnpm ops run-status` to inspect completion.",
+          "",
+          "Execution result:",
+          `- Provider: ${provider} (live-detached)`,
+          `- Provider Run ID: ${runId}`,
+          "- Provider Run status: running",
+          `- Run bundle: ${bundlePath}`,
+          `- Provider Run metadata: ${metadataPath}`,
+          `- Detached worker PID: ${worker.pid}`,
+        ];
+        process.stdout.write(`${lines.join("\n")}\n`);
+        return;
+      } else {
+        const readiness = await providerAdapter.isAvailable({ requireLogin: true });
+        if (!readiness.available) {
+          throw new Error(`${provider} CLI is required for run -- --execute --live-provider.`);
+        }
+        if (!readiness.ready) {
+          throw new Error(`${provider} login is required for run -- --execute --live-provider.`);
+        }
+
+        const promptBundle = providerAdapter.renderPromptBundle({
+          loopSpec,
+          bundle,
+        });
+
+        try {
+          const launchResult = await providerAdapter.launchLoop({
+            promptBundle,
+            outputLastMessagePath: lastMessagePath,
+            runDir: artifact.worktree_path || cwd,
+            providerRunDir,
+            timeoutMs: Number.isFinite(providerTimeoutMs) ? providerTimeoutMs : 45000,
+          });
+          const finalMessage = await readFile(lastMessagePath, "utf8");
+          const collected = providerAdapter.collectArtifacts({
+            bundle,
+            handoffArtifact: artifact.handoff_artifact,
+            verificationCommand: "pnpm ops run -- --dispatch <dispatch> --execute --live-provider",
+            timeoutMs: Number.isFinite(providerTimeoutMs) ? providerTimeoutMs : 45000,
+            finalMessage,
+            commandStdout: launchResult.stdout || "",
+            commandStderr: launchResult.stderr || "",
+          });
+          result = collected.result;
+          providerRunStatus = collected.providerRunStatus;
+          adapterMode = "live";
+          commandStdout = collected.commandStdout || "";
+          commandStderr = collected.commandStderr || "";
+          runtimeState.stop_condition = providerRunStatus === "blocked"
+            ? "The provider reports a blocked, cancelled, or timed-out result."
+            : "Acceptance criteria are satisfied and verification is complete.";
+          runtimeState.escalation_reason = providerRunStatus === "blocked"
+            ? (result.followUps?.[0] || "Inspect provider output before retrying.")
+            : "";
+        } catch (error) {
+          const finalMessage = (await pathExists(lastMessagePath)) ? await readFile(lastMessagePath, "utf8") : "";
+          const collected = providerAdapter.collectArtifacts({
+            bundle,
+            handoffArtifact: artifact.handoff_artifact,
+            verificationCommand: "pnpm ops run -- --dispatch <dispatch> --execute --live-provider",
+            timeoutMs: Number.isFinite(providerTimeoutMs) ? providerTimeoutMs : 45000,
+            finalMessage,
+            commandStdout: `${error.stdout || ""}`,
+            error,
+          });
+          result = collected.result;
+          providerRunStatus = collected.providerRunStatus;
+          adapterMode = "live";
+          commandStdout = collected.commandStdout || "";
+          commandStderr = collected.commandStderr || "";
+          runtimeState.stop_condition = "The provider reports a blocked, cancelled, or timed-out result.";
+          runtimeState.escalation_reason = result.followUps?.[0] || "Inspect provider output before retrying.";
+        }
+      }
+    } else if (!result) {
+      result = executeCodexStub({
+        bundle,
+        stubResult,
+      });
+      providerRunStatus = result.status === "blocked" ? "blocked" : "succeeded";
+      adapterMode = "stub";
+      runtimeState.stop_condition = providerRunStatus === "blocked"
+        ? "The provider reports a blocked, cancelled, or timed-out result."
+        : "Acceptance criteria are satisfied and verification is complete.";
+      runtimeState.escalation_reason = providerRunStatus === "blocked" ? (result.followUps?.[0] || "Inspect blocked result.") : "";
+    }
+    const providerRun = {
+      run_id: runId,
+      provider,
+      adapter_mode: adapterMode,
+      dispatch_id: artifact.dispatch_id,
+      issue_id: artifact.issue_id,
+      status: providerRunStatus,
+      started_at: nowIso(),
+      completed_at: nowIso(),
+      handoff_artifact: artifact.handoff_artifact,
+      loop_spec_path: loopSpecPath,
+      bundle_path: bundlePath,
+      last_message_path: liveProvider ? lastMessagePath : "",
+      stdout_log_path: stdoutLogPath,
+      stderr_log_path: stderrLogPath,
+      completion_report_target: artifact.completion_report_target,
+      claim: artifact.claim,
+      execution: bundle.execution,
+      runtime: runtimeState,
+      command_output: liveProvider
+        ? {
+            stdout: commandStdout,
+            stderr: commandStderr,
+          }
+        : undefined,
+      result: {
+        summary: result.summary,
+        follow_ups: result.followUps,
+        gaps: result.gaps,
+      },
+    };
+
+    await mkdir(path.dirname(artifact.completion_report_target), { recursive: true });
+    await writeFile(loopSpecPath, `${JSON.stringify(loopSpec, null, 2)}\n`, "utf8");
+    await writeFile(bundlePath, `${JSON.stringify(bundle, null, 2)}\n`, "utf8");
+    await writeFile(stdoutLogPath, commandStdout, "utf8");
+    await writeFile(stderrLogPath, commandStderr, "utf8");
+    await writeFile(metadataPath, `${JSON.stringify(providerRun, null, 2)}\n`, "utf8");
+
+    const completionReport = renderExecutionCompletionReport({
+      dispatch: artifact,
+      providerRun,
+      result,
+      loopSpecPath,
+      bundlePath,
+      metadataPath,
+    });
+    await writeFile(artifact.completion_report_target, completionReport, "utf8");
+
+    executionSummary = [
+      "",
+      "Execution result:",
+      `- Provider: ${provider} (${adapterMode})`,
+      `- Provider Run ID: ${runId}`,
+      `- Provider Run status: ${providerRun.status}`,
+      `- Loop Spec: ${loopSpecPath}`,
+      `- Run bundle: ${bundlePath}`,
+      `- Provider Run metadata: ${metadataPath}`,
+      liveProvider ? `- Codex final message: ${lastMessagePath}` : "",
+      `- Completion report written: ${artifact.completion_report_target}`,
+    ].filter(Boolean).join("\n");
   }
 
   const lines = [
@@ -1356,10 +2235,276 @@ async function runDispatch(args) {
     "",
     prepareWorktree
       ? "No provider was invoked. Worktree directory was prepared locally. No code was changed."
-      : "No provider was invoked. No worktree was created. No code was changed.",
+      : execute
+        ? detach
+          ? "Detached live Codex execution launched. Use `pnpm ops run-status` to inspect completion."
+          : liveProvider
+          ? "Provider execution completed through the live Codex boundary. Review the Provider Run metadata and completion artifact."
+          : "Provider execution completed through the stub boundary. No live provider was invoked and no code was changed."
+        : "No provider was invoked. No worktree was created. No code was changed.",
+    executionSummary,
   ];
 
   process.stdout.write(`${lines.join("\n")}\n`);
+}
+
+function resolveProviderRunPath(run) {
+  return path.isAbsolute(run) ? run : path.join(cwd, run.includes(".json") ? run : path.join(".ai", "provider-runs", `${run}.json`));
+}
+
+async function runStatus(args) {
+  const run = readOption(args, "run");
+  if (!run) {
+    throw new Error("run-status requires --run.");
+  }
+
+  const providerRunPath = resolveProviderRunPath(run);
+  if (!(await pathExists(providerRunPath))) {
+    throw new Error(`Provider Run not found: ${run}`);
+  }
+
+  const metadata = JSON.parse(await readFile(providerRunPath, "utf8"));
+  let processAlive = "unknown";
+  const pid = metadata.worker?.pid;
+  if (typeof pid === "number" && metadata.status === "running") {
+    try {
+      process.kill(pid, 0);
+      processAlive = "yes";
+    } catch {
+      processAlive = "no";
+    }
+  }
+  const lifecycle = providerRunLifecycle(metadata.status);
+
+  const lines = [
+    "# Provider Run Status",
+    "",
+    `Run ID: ${metadata.run_id}`,
+    `Status: ${metadata.status}`,
+    `Lifecycle: ${lifecycle}`,
+    `Provider: ${metadata.provider}`,
+    `Adapter mode: ${metadata.adapter_mode}`,
+    `Started at: ${metadata.started_at || "N/A"}`,
+    `Completed at: ${metadata.completed_at || "N/A"}`,
+    `Dispatch: ${metadata.dispatch_id}`,
+    `Issue: ${metadata.issue_id}`,
+    `Metadata: ${providerRunPath}`,
+    `Loop Spec: ${metadata.loop_spec_path || "N/A"}`,
+    `Bundle: ${metadata.bundle_path || "N/A"}`,
+    `Stdout log: ${metadata.stdout_log_path || metadata.runtime?.log_paths?.stdout || "N/A"}`,
+    `Stderr log: ${metadata.stderr_log_path || metadata.runtime?.log_paths?.stderr || "N/A"}`,
+    `Completion report: ${metadata.completion_report_target || "N/A"}`,
+    `Last message: ${metadata.last_message_path || "N/A"}`,
+    `Worker PID: ${pid || "N/A"}`,
+    `Process alive: ${processAlive}`,
+  ];
+
+  if (metadata.result?.summary) {
+    lines.push(`Summary: ${metadata.result.summary}`);
+  }
+  if (Array.isArray(metadata.result?.follow_ups) && metadata.result.follow_ups.length > 0) {
+    lines.push(`Follow-ups: ${metadata.result.follow_ups.join(" | ")}`);
+  }
+  if (Array.isArray(metadata.result?.gaps) && metadata.result.gaps.length > 0) {
+    lines.push(`Gaps: ${metadata.result.gaps.join(" | ")}`);
+  }
+  if (metadata.runtime?.stop_condition) {
+    lines.push(`Stop condition: ${metadata.runtime.stop_condition}`);
+  }
+  if (metadata.runtime?.escalation_reason) {
+    lines.push(`Escalation reason: ${metadata.runtime.escalation_reason}`);
+  }
+  if (metadata.cancelled) {
+    lines.push(`Cancelled by: ${metadata.cancelled.approved_by || "N/A"}`);
+    lines.push(`Cancelled at: ${metadata.cancelled.cancelled_at || "N/A"}`);
+    lines.push(`Cancellation reason: ${metadata.cancelled.reason || "N/A"}`);
+    lines.push(`Kill result: ${metadata.cancelled.worker_kill_result || "N/A"}`);
+  }
+
+  lines.push("");
+  lines.push("Next action:");
+  if (metadata.status === "running") {
+    lines.push(`- Keep polling with: pnpm ops run-status -- --run "${providerRunPath}"`);
+    lines.push(`- Cancel if needed with: pnpm ops run-cancel -- --run "${providerRunPath}" --approved-by <operator> --reason "<reason>"`);
+  } else if (metadata.status === "cancelled") {
+    lines.push("- Review the cancellation outcome and decide whether to reclaim or re-dispatch the slice.");
+  } else if (metadata.status === "blocked") {
+    lines.push("- Inspect the completion report and Provider Run metadata, then narrow or retry the slice.");
+  } else if (metadata.status === "succeeded") {
+    lines.push("- Review the completion artifact and advance to review-prep or QA.");
+  } else {
+    lines.push("- Inspect the Provider Run metadata before proceeding.");
+  }
+
+  process.stdout.write(`${lines.join("\n")}\n`);
+}
+
+async function runMirror(args) {
+  const run = readOption(args, "run");
+  const issue = readOption(args, "issue");
+  const apply = args.includes("--apply");
+
+  if (!run) {
+    throw new Error("run-mirror requires --run.");
+  }
+
+  const providerRunPath = resolveProviderRunPath(run);
+  if (!(await pathExists(providerRunPath))) {
+    throw new Error(`Provider Run not found: ${run}`);
+  }
+
+  const metadata = JSON.parse(await readFile(providerRunPath, "utf8"));
+  const issueRef = normalizeIssueRef(issue || metadata.issue_id);
+  if (!issueRef) {
+    throw new Error("run-mirror requires --issue or a provider run with issue_id.");
+  }
+
+  const comment = renderProviderRunMirrorComment({ metadata, issueRef, providerRunPath });
+  const plan = [
+    "# Provider Run Mirror",
+    "",
+    `Mode: ${apply ? "apply" : "dry-run"}`,
+    `Run: ${providerRunPath}`,
+    `Target: ${comment.target}`,
+    "",
+    "## Comment Body",
+    "",
+    comment.body,
+    "",
+  ].join("\n");
+  process.stdout.write(plan);
+
+  if (!apply) {
+    return;
+  }
+
+  const ghVersion = await commandAvailable("gh");
+  if (!ghVersion.available) {
+    throw new Error("gh CLI is required for run-mirror -- --apply. Install it from https://cli.github.com/.");
+  }
+
+  const auth = await commandAvailable("gh", ["auth", "status"]);
+  if (!auth.available) {
+    throw new Error("GitHub authentication is required for run-mirror -- --apply. Run `gh auth login` first.");
+  }
+
+  await runCommand("gh", ["issue", "comment", issueRef, "--body", comment.body]);
+  process.stdout.write(`GitHub comment posted to issue #${issueRef}.\n`);
+}
+
+async function runCancel(args) {
+  const run = readOption(args, "run");
+  const approvedBy = readOption(args, "approved-by");
+  const reason = readOption(args, "reason");
+
+  if (!run) {
+    throw new Error("run-cancel requires --run.");
+  }
+  if (!approvedBy) {
+    throw new Error("run-cancel requires --approved-by.");
+  }
+  if (!reason) {
+    throw new Error("run-cancel requires --reason.");
+  }
+
+  const providerRunPath = resolveProviderRunPath(run);
+  if (!(await pathExists(providerRunPath))) {
+    throw new Error(`Provider Run not found: ${run}`);
+  }
+
+  const metadata = JSON.parse(await readFile(providerRunPath, "utf8"));
+  if (metadata.status !== "running") {
+    throw new Error(`Provider Run ${metadata.run_id} is ${metadata.status}, not running.`);
+  }
+
+  const pid = metadata.worker?.pid;
+  let cancellation = "not-attempted";
+  if (typeof pid === "number") {
+    try {
+      await killProcessTree(pid);
+      cancellation = "killed";
+    } catch (error) {
+      const details = `${error.stderr || error.message || error}`.toLowerCase();
+      if (details.includes("not found") || details.includes("no running instance") || details.includes("cannot find the process")) {
+        cancellation = "already-exited";
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  metadata.status = "cancelled";
+  metadata.completed_at = nowIso();
+  metadata.cancelled = {
+    approved_by: approvedBy,
+    reason,
+    cancelled_at: metadata.completed_at,
+    worker_pid: pid || null,
+    worker_kill_result: cancellation,
+  };
+  metadata.result = {
+    summary: `Provider Run cancelled by ${approvedBy}.`,
+    follow_ups: ["Review the completion artifact and decide whether to reclaim or re-dispatch the slice."],
+    gaps: [`Cancellation reason: ${reason}`],
+  };
+
+  await writeFile(providerRunPath, `${JSON.stringify(metadata, null, 2)}\n`, "utf8");
+
+  const bundle = metadata.bundle_path && (await pathExists(metadata.bundle_path))
+    ? JSON.parse(await readFile(metadata.bundle_path, "utf8"))
+    : {
+        dispatch_id: metadata.dispatch_id,
+        issue_id: metadata.issue_id,
+        title: "",
+      };
+
+  const completionReport = renderExecutionCompletionReport({
+    dispatch: {
+      dispatch_id: metadata.dispatch_id,
+      issue_id: metadata.issue_id,
+      handoff_artifact: metadata.handoff_artifact,
+      completion_report_target: metadata.completion_report_target,
+      title: bundle.title,
+    },
+    providerRun: metadata,
+    result: {
+      status: "cancelled",
+      summary: `Provider Run was cancelled by ${approvedBy}. ${reason}`,
+      changedAreas: ["docs/agents/completions", ".ai/provider-runs"],
+      verificationCommands: ["pnpm ops run-cancel -- --run <provider-run> --approved-by <operator> --reason \"<reason>\""],
+      verificationResults: [
+        `Loaded running Provider Run ${metadata.run_id}.`,
+        typeof pid === "number"
+          ? `Cancellation attempted against worker PID ${pid} (${cancellation}).`
+          : "No worker PID was recorded; metadata was marked cancelled only.",
+        "Persisted cancelled Provider Run metadata and rewrote the Completion Report.",
+      ],
+      gaps: [`Cancellation reason: ${reason}`],
+      risks: ["The underlying provider process may require manual inspection if it did not terminate cleanly."],
+      followUps: ["Re-dispatch the slice or reclaim the parent workflow state after review."],
+      artifactsUpdated: ["Provider Run metadata", "Completion Report"],
+    },
+    loopSpecPath: metadata.loop_spec_path || "",
+    bundlePath: metadata.bundle_path || "N/A",
+    metadataPath: providerRunPath,
+  });
+
+  await mkdir(path.dirname(metadata.completion_report_target), { recursive: true });
+  await writeFile(metadata.completion_report_target, completionReport, "utf8");
+
+  process.stdout.write(`${providerRunPath}\n`);
+  process.stdout.write(`Cancelled ${metadata.run_id} by ${approvedBy}.\n`);
+}
+
+async function workflowConsoleCommand(args) {
+  const portValue = Number.parseInt(readOption(args, "port", "4173"), 10);
+  const host = readOption(args, "host", "127.0.0.1");
+  const { port } = await startWorkflowConsole({
+    cwd,
+    port: Number.isFinite(portValue) ? portValue : 4173,
+    host,
+  });
+  process.stdout.write(`Workflow console running at http://${host}:${port}\n`);
 }
 
 async function main() {
@@ -1376,8 +2521,28 @@ async function main() {
     return;
   }
 
+  if (command === "setup") {
+    await setupPlane(args);
+    return;
+  }
+
+  if (command === "context") {
+    await contextCommand(args);
+    return;
+  }
+
+  if (command === "context-approve") {
+    await contextApproveCommand(args);
+    return;
+  }
+
   if (command === "prd") {
     await runNodeScript("prd.mjs", args);
+    return;
+  }
+
+  if (command === "prd-approve") {
+    await prdApproveCommand(args);
     return;
   }
 
@@ -1453,6 +2618,16 @@ async function main() {
     return;
   }
 
+  if (command === "review-decision") {
+    await reviewDecisionCommand(args);
+    return;
+  }
+
+  if (command === "qa-decision") {
+    await qaDecisionCommand(args);
+    return;
+  }
+
   if (command === "memory-propose") {
     const proposal = createMemoryProposal({
       type: readOption(args, "type"),
@@ -1520,8 +2695,33 @@ async function main() {
     return;
   }
 
+  if (command === "ralph") {
+    await ralphCommand(args);
+    return;
+  }
+
   if (command === "run") {
     await runDispatch(args);
+    return;
+  }
+
+  if (command === "run-status") {
+    await runStatus(args);
+    return;
+  }
+
+  if (command === "run-cancel") {
+    await runCancel(args);
+    return;
+  }
+
+  if (command === "run-mirror") {
+    await runMirror(args);
+    return;
+  }
+
+  if (command === "console") {
+    await workflowConsoleCommand(args);
     return;
   }
 

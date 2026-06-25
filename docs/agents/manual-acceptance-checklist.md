@@ -14,9 +14,9 @@ A fresh **Solo Operator** should be able to satisfy every required item below wi
 
 ### 1. GitHub CLI readiness
 
-- [ ] The Solo Operator can run `gh auth status` successfully in the intended shell environment.
-- [ ] The repo docs explain the immediate shell fix and the permanent environment fix when `gh` is missing.
-- [ ] The repo docs explain that GitHub-backed flow requires authenticated `gh`.
+- [x] The Solo Operator can run `gh auth status` successfully in the intended shell environment.
+- [x] The repo docs explain the immediate shell fix and the permanent environment fix when `gh` is missing.
+- [x] The repo docs explain that GitHub-backed flow requires authenticated `gh`.
 
 Evidence:
 
@@ -26,9 +26,9 @@ Evidence:
 
 ### 2. GitHub project configuration
 
-- [ ] The Solo Operator can identify the required GitHub config fields from repo docs.
-- [ ] The docs explain the required Project fields and the role of `.ai/ops.config.json`.
-- [ ] `pnpm ops github:init` and `pnpm ops github:export` provide actionable guidance when project configuration is incomplete.
+- [x] The Solo Operator can identify the required GitHub config fields from repo docs.
+- [x] The docs explain the required Project fields and the role of `.ai/ops.config.json`.
+- [x] `pnpm ops github:init` and `pnpm ops github:export` provide actionable guidance when project configuration is incomplete.
 
 Evidence:
 
@@ -38,9 +38,9 @@ Evidence:
 
 ### 3. Canonical manual walkthrough exists
 
-- [ ] A single canonical walkthrough exists and is the primary operator-facing workflow artifact.
-- [ ] The walkthrough covers `init`, `github:init`, `prd`, `issues`, `handoff`, `github:export`, `schedule --dispatch`, `claim`, `run --prepare-worktree`, `complete`, `review-prep`, `qa`, and `feedback`.
-- [ ] Each step includes prerequisites, exact command text, expected artifact or output, common failure modes, and exact next command.
+- [x] A single canonical walkthrough exists and is the primary operator-facing workflow artifact.
+- [x] The walkthrough covers `init`, `github:init`, `prd`, `issues`, `handoff`, `github:export`, `schedule --dispatch`, `claim`, `run --prepare-worktree`, `complete`, `review-prep`, `qa`, and `feedback`.
+- [x] Each step includes prerequisites, exact command text, expected artifact or output, common failure modes, and exact next command.
 
 Evidence:
 
@@ -48,9 +48,9 @@ Evidence:
 
 ### 4. Artifact chain works locally
 
-- [ ] The manual OS has a scripted local smoke test that chains artifacts end to end.
-- [ ] The smoke test uses fixture-backed GitHub export where live GitHub is unnecessary.
-- [ ] The smoke test is suitable as a future gating check.
+- [x] The manual OS has a scripted local smoke test that chains artifacts end to end.
+- [x] The smoke test uses fixture-backed GitHub export where live GitHub is unnecessary.
+- [x] The smoke test is suitable as a future gating check.
 
 Evidence:
 
@@ -59,9 +59,9 @@ Evidence:
 
 ### 5. Review-entry workflow is hardened
 
-- [ ] `complete` generates a Completion Report template with explicit required and optional markers.
-- [ ] `review-prep` resolves the latest issue-matching completion report when safe.
-- [ ] `review-prep` fails with explicit missing-input guidance when the review gate is incomplete.
+- [x] `complete` generates a Completion Report template with explicit required and optional markers.
+- [x] `review-prep` resolves the latest issue-matching completion report when safe.
+- [x] `review-prep` fails with explicit missing-input guidance when the review gate is incomplete.
 
 Evidence:
 
@@ -72,9 +72,9 @@ Evidence:
 
 ### 6. Dispatch workflow is hardened
 
-- [ ] `schedule -- --dispatch` creates Dispatch Artifacts only for dispatchable queue items.
-- [ ] `claim`, `run`, `claim-status`, and `reclaim` support safer artifact resolution and give exact follow-up commands on ambiguity.
-- [ ] Missing queue and dispatch artifacts produce recovery guidance with exact commands.
+- [x] `schedule -- --dispatch` creates Dispatch Artifacts only for dispatchable queue items.
+- [x] `claim`, `run`, `claim-status`, and `reclaim` support safer artifact resolution and give exact follow-up commands on ambiguity.
+- [x] Missing queue and dispatch artifacts produce recovery guidance with exact commands.
 
 Evidence:
 
@@ -84,9 +84,9 @@ Evidence:
 
 ### 7. GitHub export is stable against real shapes
 
-- [ ] `github:export` supports nested, flattened, empty-field, and alternate top-level item shapes from `gh project item-list`.
-- [ ] Export preserves scheduler-critical queue fields for non-`Done` items.
-- [ ] Missing `gh` and missing project-reference errors provide actionable recovery guidance.
+- [x] `github:export` supports nested, flattened, empty-field, and alternate top-level item shapes from `gh project item-list`.
+- [x] Export preserves scheduler-critical queue fields for non-`Done` items.
+- [x] Missing `gh` and missing project-reference errors provide actionable recovery guidance.
 
 Evidence:
 
@@ -95,9 +95,9 @@ Evidence:
 
 ### 8. Tracker and artifact command validation exists
 
-- [ ] Real-repo validation notes exist for tracker-facing commands.
-- [ ] Real-repo validation notes exist for artifact-oriented commands.
-- [ ] Each note records prerequisites, outputs/artifacts, readiness, and rough edges.
+- [x] Real-repo validation notes exist for tracker-facing commands.
+- [x] Real-repo validation notes exist for artifact-oriented commands.
+- [x] Each note records prerequisites, outputs/artifacts, readiness, and rough edges.
 
 Evidence:
 
@@ -106,9 +106,9 @@ Evidence:
 
 ### 9. Product shape is documented
 
-- [ ] The skills/prompts split is explicitly documented.
-- [ ] The TDD contract placement is explicitly decided.
-- [ ] The docs reflect the approved decision that TDD remains a doc-only contract in this phase.
+- [x] The skills/prompts split is explicitly documented.
+- [x] The TDD contract placement is explicitly decided.
+- [x] The docs reflect the approved decision that TDD remains a doc-only contract in this phase.
 
 Evidence:
 
@@ -119,9 +119,9 @@ Evidence:
 
 ### 10. Remaining rough edges are explicit
 
-- [ ] Remaining operator-guesswork gaps are documented rather than implicit.
-- [ ] The reconciliation artifact distinguishes eliminated gaps from unresolved follow-up work.
-- [ ] No unresolved rough edge is silently treated as “done”.
+- [x] Remaining operator-guesswork gaps are documented rather than implicit.
+- [x] The reconciliation artifact distinguishes eliminated gaps from unresolved follow-up work.
+- [x] No unresolved rough edge is silently treated as "done".
 
 Evidence:
 
@@ -130,21 +130,29 @@ Evidence:
 
 ## Current Status
 
+Updated: 2026-06-25
+
 ### Checklist Result
 
-- [ ] Manual OS is accepted as complete for pre-automation use
+- [x] Manual OS is accepted as complete for pre-automation use
 
-### Blocking Follow-Up Items Before Full Acceptance
+### Closed Follow-Up Items
 
-- [ ] Exact targeted-QA artifact matching replaces current substring-based artifact resolution in `scripts/qa.mjs`.
-- [ ] The canonical walkthrough documents the existing-live-issue path as explicitly as the new-feature path.
-- [ ] The docs define recovery when export/schedule selects a different issue than the one under active ownership.
-- [ ] The docs define the intended pre-PR path for `review-prep`, `qa`, and `feedback`.
-- [ ] `github:export` provides clearer issue-level exclusion reporting when the intended issue is absent from the configured project.
-- [ ] Manual `dispatch` validates matching handoff selection rather than relying on substring-based inference.
+- [x] Exact targeted-QA artifact matching replaces loose substring artifact resolution in `scripts/qa.mjs`.
+  - Evidence: `tests/qa-cli.test.mjs` covers the issue `4` versus `123` false-positive class.
+- [x] The canonical walkthrough documents the existing-live-issue path as explicitly as the new-feature path.
+  - Evidence: `docs/agents/manual-walkthrough.md` now has `Choose Your Entry Path`.
+- [x] The docs define recovery when export/schedule selects a different issue than the one under active ownership.
+  - Evidence: `tests/ops-cli.test.mjs` covers requested-issue scheduler mismatch guidance.
+- [x] The docs define the intended pre-PR path for `review-prep`, `qa`, and `feedback`.
+  - Evidence: `README.md`, `docs/agents/workflow.md`, and `docs/agents/manual-walkthrough.md` make `--pr` optional unless a PR already exists.
+- [x] `github:export` provides clearer issue-level exclusion reporting when the intended issue is absent from the configured project.
+  - Evidence: `tests/ops-cli.test.mjs` covers `github:export -- --issue <id>` absence reporting.
+- [x] Manual `dispatch` validates matching handoff selection instead of relying on substring inference.
+  - Evidence: `tests/ops-cli.test.mjs` covers exact handoff matching, missing handoff refusal, and wrong-issue handoff rejection.
 
 ## Gate Decision
 
-The manual operating system is **substantially hardened and test-backed**, but it is **not yet fully accepted** for automation handoff because the blocking follow-up items above are still open.
+The manual operating system is **accepted for pre-automation use** in the current working tree.
 
-The next acceptable automation step should happen only after those follow-up items are either fixed or consciously accepted as residual risk.
+The acceptance is scoped to the manual OS contract: artifact-led planning, GitHub-backed tracking, handoff, dispatch preparation, review prep, targeted QA, feedback, and recovery guidance. It does not mean the later provider execution, DAG authority, Ralph orchestration, or workflow console layers are production-landed; those are tracked separately in `docs/agents/project-status.md`.

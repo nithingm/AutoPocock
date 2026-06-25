@@ -14,6 +14,8 @@ async function makeWorkspace(config = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), "autopocock-"));
   await mkdir(path.join(dir, ".ai"), { recursive: true });
   await mkdir(path.join(dir, "docs", "agents", "dispatches"), { recursive: true });
+  await mkdir(path.join(dir, "docs", "agents", "handoffs"), { recursive: true });
+  await mkdir(path.join(dir, "docs", "agents", "completions"), { recursive: true });
   await writeFile(
     path.join(dir, ".ai", "ops.config.json"),
     `${JSON.stringify(
@@ -299,6 +301,40 @@ test("github:export preserves scheduler fields from alternate top-level item sha
   assert.deepEqual(queue[0].labels, ["ready-for-agent", "enhancement"]);
 });
 
+test("github:export reports when the requested issue is absent from the exported project snapshot", async () => {
+  const cwd = await makeWorkspace();
+  const inputPath = path.join(cwd, "project-items.json");
+  const outputPath = path.join(cwd, ".ai", "queue.json");
+  await writeFile(
+    inputPath,
+    `${JSON.stringify(
+      {
+        items: [
+          {
+            content: {
+              number: 1,
+              url: "https://github.com/example/repo/issues/1",
+              title: "Another issue on the project",
+              labels: [{ name: "enhancement" }, { name: "ready-for-agent" }],
+            },
+            fieldValues: [{ field: { name: "Execution Stage" }, value: { name: "Ready for Handoff" } }],
+          },
+        ],
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const result = await runOps(cwd, ["github:export", "--input", inputPath, "--output", outputPath, "--issue", "4"]);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Exported 1 non-Done item/);
+  assert.match(result.stdout, /Requested issue #4 was not found in the exported queue snapshot\./);
+  assert.match(result.stdout, /Attach issue #4 to the configured GitHub Project or verify the project reference before scheduling\./);
+  assert.match(result.stdout, /Re-run the visibility check with: pnpm ops github:export -- --issue 4/);
+});
+
 test("run refuses dispatch artifacts that are not claimed", async () => {
   const cwd = await makeWorkspace();
   const dispatchPath = path.join(cwd, "docs", "agents", "dispatches", "dispatch-test.json");
@@ -359,6 +395,718 @@ test("run validates a claimed dispatch without invoking a provider", async () =>
   assert.match(result.stdout, /Dispatch: dispatch-test/);
   assert.match(result.stdout, /Worktree path: D:\\temp\\worktree/);
   assert.match(result.stdout, /No provider was invoked/);
+});
+
+test("run --execute persists provider-run metadata and writes a real completion report", async () => {
+  const cwd = await makeWorkspace();
+  const handoffPath = path.join(cwd, "docs", "agents", "handoffs", "2026-05-14-23-proof.md");
+  const completionPath = path.join(cwd, "docs", "agents", "completions", "dispatch-test-completion.md");
+  const dispatchPath = path.join(cwd, "docs", "agents", "dispatches", "dispatch-test.json");
+  await writeFile(
+    handoffPath,
+    `# Context Handoff
+
+## Goal
+
+- Prove the execution boundary.
+
+## Acceptance Criteria
+
+- Persist Provider Run metadata.
+- Write a real Completion Report.
+
+## Verification
+
+- Automated:
+  - node --test
+`,
+  );
+  await writeFile(
+    dispatchPath,
+    `${JSON.stringify(
+      {
+        dispatch_id: "dispatch-test",
+        issue_id: "23",
+        title: "Execution proof",
+        status: "claimed",
+        forbidden_actions: ["merge PR", "handle secrets"],
+        expected_branch: "agent/execution-proof",
+        isolation_mode: "worktree",
+        worktree_path: path.join(cwd, ".worktrees", "execution-proof"),
+        handoff_artifact: handoffPath,
+        completion_report_target: completionPath,
+        claim: {
+          claimed_by: "test-runner",
+          claimed_at: "2026-05-14T00:00:00.000Z",
+          isolation_mode: "worktree",
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const result = await runOps(cwd, ["run", "--dispatch", dispatchPath, "--execute"]);
+  const providerRunDir = path.join(cwd, ".ai", "provider-runs");
+  const providerRunFiles = await readdir(providerRunDir);
+  const metadataFile = providerRunFiles.find((entry) => /^provider-run-.*\.json$/.test(entry) && !entry.includes("-bundle."));
+  const bundleFile = providerRunFiles.find((entry) => entry.includes("-bundle.json"));
+  const metadata = JSON.parse(await readFile(path.join(providerRunDir, metadataFile), "utf8"));
+  const bundle = JSON.parse(await readFile(path.join(providerRunDir, bundleFile), "utf8"));
+  const loopSpec = JSON.parse(await readFile(metadata.loop_spec_path, "utf8"));
+  const completion = await readFile(completionPath, "utf8");
+  const stdoutLog = await readFile(metadata.stdout_log_path, "utf8");
+  const stderrLog = await readFile(metadata.stderr_log_path, "utf8");
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Execution result:/);
+  assert.match(result.stdout, /Provider: codex \(stub\)/);
+  assert.match(result.stdout, /Provider Run status: succeeded/);
+  assert.equal(metadata.provider, "codex");
+  assert.equal(metadata.adapter_mode, "stub");
+  assert.equal(metadata.status, "succeeded");
+  assert.match(metadata.loop_spec_path, /docs[\\/]agents[\\/]loop-specs[\\/]dispatch-test-loop-spec\.json$/);
+  assert.equal(bundle.provider, "codex");
+  assert.equal(bundle.dispatch_id, "dispatch-test");
+  assert.equal(bundle.loop_spec_id, loopSpec.loop_spec_id);
+  assert.equal(loopSpec.goal, "Prove the execution boundary.");
+  assert.deepEqual(loopSpec.acceptance_criteria, ["Persist Provider Run metadata.", "Write a real Completion Report."]);
+  assert.equal(metadata.runtime.stop_condition, "Acceptance criteria are satisfied and verification is complete.");
+  assert.equal(metadata.runtime.log_paths.stdout, metadata.stdout_log_path);
+  assert.equal(metadata.runtime.log_paths.stderr, metadata.stderr_log_path);
+  assert.equal(stdoutLog, "");
+  assert.equal(stderrLog, "");
+  assert.match(completion, /- Status: needs human review/);
+  assert.match(completion, /Provider execution path succeeded through the Codex stub boundary/);
+});
+
+test("run --execute --stub-result blocked writes a blocked completion report", async () => {
+  const cwd = await makeWorkspace();
+  const handoffPath = path.join(cwd, "docs", "agents", "handoffs", "2026-05-14-23-proof.md");
+  const completionPath = path.join(cwd, "docs", "agents", "completions", "dispatch-test-completion.md");
+  const dispatchPath = path.join(cwd, "docs", "agents", "dispatches", "dispatch-test.json");
+  await writeFile(
+    handoffPath,
+    `# Context Handoff
+
+## Goal
+
+- Prove blocked execution handling.
+`,
+  );
+  await writeFile(
+    dispatchPath,
+    `${JSON.stringify(
+      {
+        dispatch_id: "dispatch-test",
+        issue_id: "23",
+        title: "Execution blocked proof",
+        status: "claimed",
+        forbidden_actions: ["merge PR", "handle secrets"],
+        expected_branch: "agent/execution-blocked-proof",
+        isolation_mode: "branch",
+        worktree_path: "",
+        handoff_artifact: handoffPath,
+        completion_report_target: completionPath,
+        claim: {
+          claimed_by: "test-runner",
+          claimed_at: "2026-05-14T00:00:00.000Z",
+          isolation_mode: "branch",
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const result = await runOps(cwd, ["run", "--dispatch", dispatchPath, "--execute", "--stub-result", "blocked"]);
+  const providerRunDir = path.join(cwd, ".ai", "provider-runs");
+  const providerRunFiles = await readdir(providerRunDir);
+  const metadataFile = providerRunFiles.find((entry) => /^provider-run-.*\.json$/.test(entry) && !entry.includes("-bundle."));
+  const metadata = JSON.parse(await readFile(path.join(providerRunDir, metadataFile), "utf8"));
+  const completion = await readFile(completionPath, "utf8");
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Provider Run status: blocked/);
+  assert.equal(metadata.status, "blocked");
+  assert.match(completion, /- Status: blocked/);
+  assert.match(completion, /Provider execution blocked after bundle assembly/);
+  assert.match(completion, /Suggested stage: Ready for Handoff/);
+});
+
+test("run --execute --live-provider persists live Codex metadata using a fake codex runner", async () => {
+  const cwd = await makeWorkspace();
+  const fakeCodexPath = path.join(cwd, "fake-codex.mjs");
+  const handoffPath = path.join(cwd, "docs", "agents", "handoffs", "2026-05-14-23-proof.md");
+  const completionPath = path.join(cwd, "docs", "agents", "completions", "dispatch-test-completion.md");
+  const dispatchPath = path.join(cwd, "docs", "agents", "dispatches", "dispatch-test.json");
+  await writeFile(
+    fakeCodexPath,
+    `import { writeFile } from "node:fs/promises";
+const args = process.argv.slice(2);
+const outputIndex = args.indexOf("--output-last-message");
+const outputPath = outputIndex === -1 ? "" : args[outputIndex + 1];
+if (outputPath) {
+  await writeFile(outputPath, "Status: success\\nSummary: Live Codex adapter executed successfully.\\nVerification: Read the handoff artifact and returned a bounded result.\\nFollow-up: Review the generated completion artifact.\\n", "utf8");
+}
+process.stdout.write("fake codex exec ok\\n");
+`,
+  );
+  await writeFile(
+    handoffPath,
+    `# Context Handoff
+
+## Goal
+
+- Prove the live execution boundary.
+`,
+  );
+  await writeFile(
+    dispatchPath,
+    `${JSON.stringify(
+      {
+        dispatch_id: "dispatch-test",
+        issue_id: "23",
+        title: "Live execution proof",
+        status: "claimed",
+        forbidden_actions: ["merge PR", "handle secrets"],
+        expected_branch: "agent/live-execution-proof",
+        isolation_mode: "worktree",
+        worktree_path: path.join(cwd, ".worktrees", "live-execution-proof"),
+        handoff_artifact: handoffPath,
+        completion_report_target: completionPath,
+        claim: {
+          claimed_by: "test-runner",
+          claimed_at: "2026-05-14T00:00:00.000Z",
+          isolation_mode: "worktree",
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const result = await runOps(cwd, ["run", "--dispatch", dispatchPath, "--execute", "--live-provider"], {
+    env: {
+      AUTOPOCOCK_CODEX_EXEC_SCRIPT: fakeCodexPath,
+    },
+  });
+  const providerRunDir = path.join(cwd, ".ai", "provider-runs");
+  const providerRunFiles = await readdir(providerRunDir);
+  const metadataFile = providerRunFiles.find((entry) => /^provider-run-.*\.json$/.test(entry) && !entry.includes("-bundle."));
+  const lastMessageFile = providerRunFiles.find((entry) => entry.endsWith("-last-message.txt"));
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.ok(metadataFile, `Expected provider-run metadata file in ${providerRunDir}. Files: ${providerRunFiles.join(", ")}`);
+  assert.ok(lastMessageFile, `Expected Codex last-message file in ${providerRunDir}. Files: ${providerRunFiles.join(", ")}`);
+  const metadata = JSON.parse(await readFile(path.join(providerRunDir, metadataFile), "utf8"));
+  const completion = await readFile(completionPath, "utf8");
+  const lastMessage = await readFile(path.join(providerRunDir, lastMessageFile), "utf8");
+
+  assert.match(result.stdout, /Provider: codex \(live\)/);
+  assert.match(result.stdout, /Provider Run status: succeeded/);
+  assert.equal(metadata.adapter_mode, "live");
+  assert.equal(metadata.status, "succeeded");
+  assert.match(metadata.loop_spec_path, /docs[\\/]agents[\\/]loop-specs[\\/]dispatch-test-loop-spec\.json$/);
+  assert.equal(metadata.runtime.stop_condition, "Acceptance criteria are satisfied and verification is complete.");
+  assert.equal(metadata.runtime.log_paths.stdout, metadata.stdout_log_path);
+  assert.equal(metadata.runtime.log_paths.stderr, metadata.stderr_log_path);
+  assert.match(lastMessage, /Status: success/);
+  assert.match(completion, /Live Codex adapter executed successfully/);
+});
+
+test("run --execute --live-provider succeeds when the Codex process waits for stdin to close", async () => {
+  const cwd = await makeWorkspace();
+  const fakeCodexPath = path.join(cwd, "fake-codex-needs-stdin-close.mjs");
+  const handoffPath = path.join(cwd, "docs", "agents", "handoffs", "2026-05-14-23-proof.md");
+  const completionPath = path.join(cwd, "docs", "agents", "completions", "dispatch-test-completion.md");
+  const dispatchPath = path.join(cwd, "docs", "agents", "dispatches", "dispatch-test.json");
+  await writeFile(
+    fakeCodexPath,
+    `import { writeFile } from "node:fs/promises";
+const args = process.argv.slice(2);
+const outputIndex = args.indexOf("--output-last-message");
+const outputPath = outputIndex === -1 ? "" : args[outputIndex + 1];
+let stdinData = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  stdinData += chunk;
+});
+process.stdin.on("end", async () => {
+  if (outputPath) {
+    await writeFile(outputPath, "Status: success\\nSummary: Live Codex adapter executed successfully after stdin closed.\\nVerification: stdin was closed explicitly by the runtime host.\\nFollow-up: Review the generated completion artifact.\\n", "utf8");
+  }
+  process.stdout.write("stdin-ended<" + stdinData + ">\\n");
+});
+`,
+  );
+  await writeFile(
+    handoffPath,
+    `# Context Handoff
+
+## Goal
+
+- Prove stdin-close handling for live execution.
+`,
+  );
+  await writeFile(
+    dispatchPath,
+    `${JSON.stringify(
+      {
+        dispatch_id: "dispatch-test",
+        issue_id: "33",
+        title: "Live stdin-close proof",
+        status: "claimed",
+        forbidden_actions: ["merge PR", "handle secrets"],
+        expected_branch: "agent/live-stdin-close-proof",
+        isolation_mode: "worktree",
+        worktree_path: path.join(cwd, ".worktrees", "live-stdin-close-proof"),
+        handoff_artifact: handoffPath,
+        completion_report_target: completionPath,
+        claim: {
+          claimed_by: "test-runner",
+          claimed_at: "2026-05-14T00:00:00.000Z",
+          isolation_mode: "worktree",
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const result = await runOps(cwd, ["run", "--dispatch", dispatchPath, "--execute", "--live-provider", "--provider-timeout-ms", "1000"], {
+    env: {
+      AUTOPOCOCK_CODEX_EXEC_SCRIPT: fakeCodexPath,
+    },
+  });
+  const providerRunDir = path.join(cwd, ".ai", "provider-runs");
+  const providerRunFiles = await readdir(providerRunDir);
+  const metadataFile = providerRunFiles.find((entry) => /^provider-run-.*\.json$/.test(entry) && !entry.includes("-bundle."));
+  const metadata = JSON.parse(await readFile(path.join(providerRunDir, metadataFile), "utf8"));
+  const completion = await readFile(completionPath, "utf8");
+
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Provider Run status: succeeded/);
+  assert.equal(metadata.status, "succeeded");
+  assert.match(metadata.command_output.stdout, /stdin-ended<>/);
+  assert.match(completion, /executed successfully after stdin closed/);
+});
+
+test("run --execute --live-provider writes blocked artifacts when Codex exceeds the timeout budget", async () => {
+  const cwd = await makeWorkspace();
+  const fakeCodexPath = path.join(cwd, "fake-codex-timeout.mjs");
+  const handoffPath = path.join(cwd, "docs", "agents", "handoffs", "2026-05-14-23-proof.md");
+  const completionPath = path.join(cwd, "docs", "agents", "completions", "dispatch-test-completion.md");
+  const dispatchPath = path.join(cwd, "docs", "agents", "dispatches", "dispatch-test.json");
+  await writeFile(
+    fakeCodexPath,
+    `await new Promise((resolve) => setTimeout(resolve, 200));`,
+  );
+  await writeFile(
+    handoffPath,
+    `# Context Handoff
+
+## Goal
+
+- Prove timeout handling.
+`,
+  );
+  await writeFile(
+    dispatchPath,
+    `${JSON.stringify(
+      {
+        dispatch_id: "dispatch-test",
+        issue_id: "23",
+        title: "Live timeout proof",
+        status: "claimed",
+        forbidden_actions: ["merge PR", "handle secrets"],
+        expected_branch: "agent/live-timeout-proof",
+        isolation_mode: "worktree",
+        worktree_path: path.join(cwd, ".worktrees", "live-timeout-proof"),
+        handoff_artifact: handoffPath,
+        completion_report_target: completionPath,
+        claim: {
+          claimed_by: "test-runner",
+          claimed_at: "2026-05-14T00:00:00.000Z",
+          isolation_mode: "worktree",
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const result = await runOps(
+    cwd,
+    ["run", "--dispatch", dispatchPath, "--execute", "--live-provider", "--provider-timeout-ms", "50"],
+    {
+      env: {
+        AUTOPOCOCK_CODEX_EXEC_SCRIPT: fakeCodexPath,
+      },
+    },
+  );
+  const providerRunDir = path.join(cwd, ".ai", "provider-runs");
+  const providerRunFiles = await readdir(providerRunDir);
+  const metadataFile = providerRunFiles.find((entry) => /^provider-run-.*\.json$/.test(entry) && !entry.includes("-bundle."));
+  const metadata = JSON.parse(await readFile(path.join(providerRunDir, metadataFile), "utf8"));
+  const completion = await readFile(completionPath, "utf8");
+
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Provider Run status: blocked/);
+  assert.equal(metadata.adapter_mode, "live");
+  assert.equal(metadata.status, "blocked");
+  assert.equal(metadata.runtime.stop_condition, "The provider reports a blocked, cancelled, or timed-out result.");
+  assert.match(metadata.runtime.escalation_reason, /Inspect the Provider Run metadata and provider output/);
+  assert.match(completion, /- Status: blocked/);
+  assert.match(completion, /exceeded the timeout budget of 50 ms/);
+});
+
+test("run --execute persists a blocked Provider Run when required handoff context is missing", async () => {
+  const cwd = await makeWorkspace();
+  const completionPath = path.join(cwd, "docs", "agents", "completions", "dispatch-test-completion.md");
+  const dispatchPath = path.join(cwd, "docs", "agents", "dispatches", "dispatch-test.json");
+  await writeFile(
+    dispatchPath,
+    `${JSON.stringify(
+      {
+        dispatch_id: "dispatch-test",
+        issue_id: "30",
+        title: "Missing handoff proof",
+        status: "claimed",
+        forbidden_actions: ["merge PR", "handle secrets"],
+        expected_branch: "agent/missing-handoff-proof",
+        isolation_mode: "worktree",
+        worktree_path: path.join(cwd, ".worktrees", "missing-handoff-proof"),
+        handoff_artifact: path.join(cwd, "docs", "agents", "handoffs", "missing.md"),
+        completion_report_target: completionPath,
+        claim: {
+          claimed_by: "test-runner",
+          claimed_at: "2026-05-14T00:00:00.000Z",
+          isolation_mode: "worktree",
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const result = await runOps(cwd, ["run", "--dispatch", dispatchPath, "--execute"]);
+  const providerRunDir = path.join(cwd, ".ai", "provider-runs");
+  const providerRunFiles = await readdir(providerRunDir);
+  const metadataFile = providerRunFiles.find((entry) => /^provider-run-.*\.json$/.test(entry) && !entry.includes("-bundle."));
+  const metadata = JSON.parse(await readFile(path.join(providerRunDir, metadataFile), "utf8"));
+  const completion = await readFile(completionPath, "utf8");
+
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Provider Run status: blocked/);
+  assert.equal(metadata.status, "blocked");
+  assert.equal(metadata.runtime.stop_condition, "required context artifact missing");
+  assert.match(metadata.runtime.escalation_reason, /Restore the handoff artifact/);
+  assert.match(completion, /required handoff artifact was missing/);
+});
+
+test("run --execute --live-provider --detach launches a background worker and run-status reports completion", async () => {
+  const cwd = await makeWorkspace();
+  const fakeCodexPath = path.join(cwd, "fake-codex-detached.mjs");
+  const handoffPath = path.join(cwd, "docs", "agents", "handoffs", "2026-05-14-23-proof.md");
+  const completionPath = path.join(cwd, "docs", "agents", "completions", "dispatch-test-completion.md");
+  const dispatchPath = path.join(cwd, "docs", "agents", "dispatches", "dispatch-test.json");
+  await writeFile(
+    fakeCodexPath,
+    `import { writeFile } from "node:fs/promises";
+const args = process.argv.slice(2);
+const outputIndex = args.indexOf("--output-last-message");
+const outputPath = outputIndex === -1 ? "" : args[outputIndex + 1];
+await new Promise((resolve) => setTimeout(resolve, 150));
+if (outputPath) {
+  await writeFile(outputPath, "Status: success\\nSummary: Detached Codex execution completed successfully.\\nVerification: Background worker read the handoff and finished.\\nFollow-up: Review the completion artifact.\\n", "utf8");
+}
+`,
+  );
+  await writeFile(
+    handoffPath,
+    `# Context Handoff
+
+## Goal
+
+- Prove detached execution.
+`,
+  );
+  await writeFile(
+    dispatchPath,
+    `${JSON.stringify(
+      {
+        dispatch_id: "dispatch-test",
+        issue_id: "23",
+        title: "Detached execution proof",
+        status: "claimed",
+        forbidden_actions: ["merge PR", "handle secrets"],
+        expected_branch: "agent/detached-execution-proof",
+        isolation_mode: "worktree",
+        worktree_path: path.join(cwd, ".worktrees", "detached-execution-proof"),
+        handoff_artifact: handoffPath,
+        completion_report_target: completionPath,
+        claim: {
+          claimed_by: "test-runner",
+          claimed_at: "2026-05-14T00:00:00.000Z",
+          isolation_mode: "worktree",
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const launch = await runOps(
+    cwd,
+    ["run", "--dispatch", dispatchPath, "--execute", "--live-provider", "--detach", "--provider-timeout-ms", "1000"],
+    {
+      env: {
+        AUTOPOCOCK_CODEX_EXEC_SCRIPT: fakeCodexPath,
+      },
+    },
+  );
+
+  assert.equal(launch.code, 0, launch.stderr || launch.stdout);
+  assert.match(launch.stdout, /Provider: codex \(live-detached\)/);
+  assert.match(launch.stdout, /Provider Run status: running/);
+  const metadataPath = launch.stdout.match(/Provider Run metadata: (.+\.json)/)?.[1]?.trim();
+  assert.ok(metadataPath, `Expected metadata path in launch output:\n${launch.stdout}`);
+
+  let statusResult = null;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    statusResult = await runOps(cwd, ["run-status", "--run", metadataPath]);
+    if (/Status: succeeded/.test(statusResult.stdout)) {
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  const metadata = JSON.parse(await readFile(metadataPath, "utf8"));
+  const completion = await readFile(completionPath, "utf8");
+
+  assert.equal(statusResult.code, 0, statusResult?.stderr || statusResult?.stdout);
+  assert.match(statusResult.stdout, /# Provider Run Status/);
+  assert.match(statusResult.stdout, /Status: succeeded/);
+  assert.match(statusResult.stdout, /Lifecycle: completed/);
+  assert.match(statusResult.stdout, /Next action:/);
+  assert.equal(metadata.adapter_mode, "live-detached");
+  assert.equal(metadata.status, "succeeded");
+  assert.match(completion, /Detached Codex execution completed successfully/);
+});
+
+test("run --execute --live-provider --detach succeeds when the Codex process waits for stdin to close", async () => {
+  const cwd = await makeWorkspace();
+  const fakeCodexPath = path.join(cwd, "fake-codex-detached-needs-stdin-close.mjs");
+  const handoffPath = path.join(cwd, "docs", "agents", "handoffs", "2026-05-14-33-proof.md");
+  const completionPath = path.join(cwd, "docs", "agents", "completions", "dispatch-test-completion.md");
+  const dispatchPath = path.join(cwd, "docs", "agents", "dispatches", "dispatch-test.json");
+  await writeFile(
+    fakeCodexPath,
+    `import { writeFile } from "node:fs/promises";
+const args = process.argv.slice(2);
+const outputIndex = args.indexOf("--output-last-message");
+const outputPath = outputIndex === -1 ? "" : args[outputIndex + 1];
+process.stdin.setEncoding("utf8");
+let stdinData = "";
+process.stdin.on("data", (chunk) => {
+  stdinData += chunk;
+});
+process.stdin.on("end", async () => {
+  if (outputPath) {
+    await writeFile(outputPath, "Status: success\\nSummary: Detached Codex execution completed after stdin closed.\\nVerification: background worker closed stdin explicitly.\\nFollow-up: Review the completion artifact.\\n", "utf8");
+  }
+  process.stdout.write("stdin-ended<" + stdinData + ">\\n");
+});
+`,
+  );
+  await writeFile(
+    handoffPath,
+    `# Context Handoff
+
+## Goal
+
+- Prove detached stdin-close handling.
+`,
+  );
+  await writeFile(
+    dispatchPath,
+    `${JSON.stringify(
+      {
+        dispatch_id: "dispatch-test",
+        issue_id: "33",
+        title: "Detached stdin-close proof",
+        status: "claimed",
+        forbidden_actions: ["merge PR", "handle secrets"],
+        expected_branch: "agent/detached-stdin-close-proof",
+        isolation_mode: "worktree",
+        worktree_path: path.join(cwd, ".worktrees", "detached-stdin-close-proof"),
+        handoff_artifact: handoffPath,
+        completion_report_target: completionPath,
+        claim: {
+          claimed_by: "test-runner",
+          claimed_at: "2026-05-14T00:00:00.000Z",
+          isolation_mode: "worktree",
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const launch = await runOps(
+    cwd,
+    ["run", "--dispatch", dispatchPath, "--execute", "--live-provider", "--detach", "--provider-timeout-ms", "1000"],
+    {
+      env: {
+        AUTOPOCOCK_CODEX_EXEC_SCRIPT: fakeCodexPath,
+      },
+    },
+  );
+
+  assert.equal(launch.code, 0, launch.stderr || launch.stdout);
+  const metadataPath = launch.stdout.match(/Provider Run metadata: (.+\.json)/)?.[1]?.trim();
+  assert.ok(metadataPath, `Expected metadata path in launch output:\n${launch.stdout}`);
+
+  let statusResult = null;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    statusResult = await runOps(cwd, ["run-status", "--run", metadataPath]);
+    if (/Status: succeeded/.test(statusResult.stdout)) {
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  const metadata = JSON.parse(await readFile(metadataPath, "utf8"));
+  const completion = await readFile(completionPath, "utf8");
+
+  assert.equal(statusResult.code, 0, statusResult?.stderr || statusResult?.stdout);
+  assert.equal(metadata.status, "succeeded");
+  assert.match(metadata.command_output.stdout, /stdin-ended<>/);
+  assert.match(completion, /completed after stdin closed/);
+});
+
+test("run-cancel stops a detached provider run and persists a cancelled completion report", async () => {
+  const cwd = await makeWorkspace();
+  const fakeCodexPath = path.join(cwd, "fake-codex-cancel.mjs");
+  const handoffPath = path.join(cwd, "docs", "agents", "handoffs", "2026-05-14-23-proof.md");
+  const completionPath = path.join(cwd, "docs", "agents", "completions", "dispatch-test-completion.md");
+  const dispatchPath = path.join(cwd, "docs", "agents", "dispatches", "dispatch-test.json");
+  await writeFile(
+    fakeCodexPath,
+    `await new Promise((resolve) => setTimeout(resolve, 5000));`,
+  );
+  await writeFile(
+    handoffPath,
+    `# Context Handoff
+
+## Goal
+
+- Prove detached cancellation.
+`,
+  );
+  await writeFile(
+    dispatchPath,
+    `${JSON.stringify(
+      {
+        dispatch_id: "dispatch-test",
+        issue_id: "23",
+        title: "Detached cancellation proof",
+        status: "claimed",
+        forbidden_actions: ["merge PR", "handle secrets"],
+        expected_branch: "agent/detached-cancellation-proof",
+        isolation_mode: "worktree",
+        worktree_path: path.join(cwd, ".worktrees", "detached-cancellation-proof"),
+        handoff_artifact: handoffPath,
+        completion_report_target: completionPath,
+        claim: {
+          claimed_by: "test-runner",
+          claimed_at: "2026-05-14T00:00:00.000Z",
+          isolation_mode: "worktree",
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const launch = await runOps(
+    cwd,
+    ["run", "--dispatch", dispatchPath, "--execute", "--live-provider", "--detach", "--provider-timeout-ms", "10000"],
+    {
+      env: {
+        AUTOPOCOCK_CODEX_EXEC_SCRIPT: fakeCodexPath,
+      },
+    },
+  );
+
+  assert.equal(launch.code, 0, launch.stderr || launch.stdout);
+  const metadataPath = launch.stdout.match(/Provider Run metadata: (.+\.json)/)?.[1]?.trim();
+  assert.ok(metadataPath, `Expected metadata path in launch output:\n${launch.stdout}`);
+
+  const cancel = await runOps(cwd, [
+    "run-cancel",
+    "--run",
+    metadataPath,
+    "--approved-by",
+    "solo-operator",
+    "--reason",
+    "No longer needed",
+  ]);
+
+  const metadata = JSON.parse(await readFile(metadataPath, "utf8"));
+  const completion = await readFile(completionPath, "utf8");
+  const status = await runOps(cwd, ["run-status", "--run", metadataPath]);
+
+  assert.equal(cancel.code, 0, cancel.stderr || cancel.stdout);
+  assert.match(cancel.stdout, /Cancelled provider-run-/);
+  assert.equal(metadata.status, "cancelled");
+  assert.equal(metadata.cancelled.approved_by, "solo-operator");
+  assert.match(completion, /- Status: cancelled/);
+  assert.match(completion, /Provider Run was cancelled by solo-operator\. No longer needed/);
+  assert.equal(status.code, 0, status.stderr || status.stdout);
+  assert.match(status.stdout, /Status: cancelled/);
+  assert.match(status.stdout, /Lifecycle: cancelled/);
+  assert.match(status.stdout, /Cancellation reason: No longer needed/);
+});
+
+test("run-mirror renders a dry-run issue comment from provider-run metadata", async () => {
+  const cwd = await makeWorkspace();
+  const metadataPath = path.join(cwd, ".ai", "provider-runs", "provider-run-test.json");
+  await mkdir(path.dirname(metadataPath), { recursive: true });
+  await writeFile(
+    metadataPath,
+    `${JSON.stringify(
+      {
+        run_id: "provider-run-test",
+        provider: "codex",
+        adapter_mode: "live-detached",
+        dispatch_id: "dispatch-test",
+        issue_id: "23",
+        status: "blocked",
+        started_at: "2026-05-14T01:00:00.000Z",
+        completed_at: "2026-05-14T01:05:00.000Z",
+        completion_report_target: "docs/agents/completions/dispatch-test-completion.md",
+        result: {
+          summary: "Live Codex execution exceeded the timeout budget.",
+          follow_ups: ["Retry with a narrower prompt."],
+          gaps: ["Timed out."],
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const result = await runOps(cwd, ["run-mirror", "--run", metadataPath]);
+
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /# Provider Run Mirror/);
+  assert.match(result.stdout, /Mode: dry-run/);
+  assert.match(result.stdout, /Target: issue #23/);
+  assert.match(result.stdout, /- Status: blocked/);
+  assert.match(result.stdout, /- Lifecycle: blocked/);
+  assert.match(result.stdout, /- Summary: Live Codex execution exceeded the timeout budget\./);
+  assert.match(result.stdout, /- Follow-up: Retry with a narrower prompt\./);
 });
 
 test("run resolves the latest claimed dispatch when it is the only relevant artifact", async () => {
@@ -501,6 +1249,84 @@ test("schedule --dispatch reports when no dispatch artifacts are created", async
   assert.equal(dispatchEntries.length, 0);
 });
 
+test("manual dispatch auto-resolves only an exact handoff match for the requested issue", async () => {
+  const cwd = await makeWorkspace();
+  const handoffDir = path.join(cwd, "docs", "agents", "handoffs");
+  await mkdir(handoffDir, { recursive: true });
+  const wrongHandoffPath = path.join(handoffDir, "2026-05-14-123-implement-slice.md");
+  const exactHandoffPath = path.join(handoffDir, "2026-05-14-12-manual-dispatch-validation.md");
+  await writeFile(wrongHandoffPath, "# Context Handoff\n");
+  await writeFile(exactHandoffPath, "# Context Handoff\n");
+
+  const result = await runOps(cwd, [
+    "dispatch",
+    "--issue",
+    "12",
+    "--title",
+    "Manual dispatch validation",
+    "--source",
+    "manual",
+    "--override-reason",
+    "Solo Operator approved",
+  ]);
+
+  const [dispatchPath] = result.stdout.trim().split(/\r?\n/);
+  const artifact = JSON.parse(await readFile(dispatchPath, "utf8"));
+
+  assert.equal(result.code, 0);
+  assert.equal(artifact.handoff_artifact, exactHandoffPath);
+});
+
+test("manual dispatch refuses to create an artifact when no exact handoff matches the issue", async () => {
+  const cwd = await makeWorkspace();
+  const handoffDir = path.join(cwd, "docs", "agents", "handoffs");
+  await mkdir(handoffDir, { recursive: true });
+  await writeFile(path.join(handoffDir, "2026-05-14-123-implement-slice.md"), "# Context Handoff\n");
+
+  const result = await runOps(cwd, [
+    "dispatch",
+    "--issue",
+    "12",
+    "--title",
+    "Manual dispatch validation",
+    "--source",
+    "manual",
+    "--override-reason",
+    "Solo Operator approved",
+  ]);
+
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /Manual dispatch requires a matching handoff artifact for issue 12\./);
+  assert.match(result.stderr, /pnpm ops handoff -- --issue 12 --title "Implement slice"/);
+  assert.match(result.stderr, /--handoff <exact-path-to-handoff\.md>/);
+});
+
+test("manual dispatch rejects an explicit handoff artifact from a different issue", async () => {
+  const cwd = await makeWorkspace();
+  const handoffDir = path.join(cwd, "docs", "agents", "handoffs");
+  await mkdir(handoffDir, { recursive: true });
+  const wrongHandoffPath = path.join(handoffDir, "2026-05-14-123-implement-slice.md");
+  await writeFile(wrongHandoffPath, "# Context Handoff\n");
+
+  const result = await runOps(cwd, [
+    "dispatch",
+    "--issue",
+    "12",
+    "--title",
+    "Manual dispatch validation",
+    "--source",
+    "manual",
+    "--override-reason",
+    "Solo Operator approved",
+    "--handoff",
+    wrongHandoffPath,
+  ]);
+
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /Manual dispatch handoff does not match issue 12:/);
+  assert.match(result.stderr, new RegExp(escapeRegex(wrongHandoffPath)));
+});
+
 test("schedule distinguishes a missing repo ready-for-agent label from a missing issue label", async () => {
   const missingIssueLabelCwd = await makeWorkspace();
   await writeFile(
@@ -572,6 +1398,57 @@ test("schedule distinguishes a missing repo ready-for-agent label from a missing
     missingRepoLabel.stdout,
     /SKIP: ISSUE-5 Repo label missing - repo config is missing the canonical ready-for-agent label; add it under labels\.state and create the matching GitHub label before dispatching/,
   );
+});
+
+test("schedule reports recovery guidance when the requested issue is not scheduler-selected", async () => {
+  const cwd = await makeWorkspace();
+  await mkdir(path.join(cwd, "docs", "agents", "handoffs"), { recursive: true });
+  await writeFile(
+    path.join(cwd, ".ai", "queue.json"),
+    `${JSON.stringify(
+      [
+        {
+          id: "#1",
+          title: "Dispatchable slice",
+          labels: ["enhancement", "ready-for-agent"],
+          stage: "Ready for Handoff",
+          lane: "Handoff",
+          featureTrack: "ops-flow",
+          queueClass: "tracer-bullet",
+          risk: "low",
+          dependency: "unblocked",
+          conflictSurface: "low",
+          tracerBulletDone: false,
+        },
+        {
+          id: "#4",
+          title: "Active issue still blocked",
+          labels: ["enhancement"],
+          stage: "Ready for Handoff",
+          lane: "Handoff",
+          featureTrack: "ops-flow",
+          queueClass: "tracer-bullet",
+          risk: "low",
+          dependency: "unblocked",
+          conflictSurface: "low",
+          tracerBulletDone: false,
+        },
+      ],
+      null,
+      2,
+    )}\n`,
+  );
+  await writeFile(path.join(cwd, "docs", "agents", "handoffs", "2026-05-14-1-dispatchable-slice.md"), "# Context Handoff\n");
+
+  const result = await runOps(cwd, ["schedule", "--queue", ".ai/queue.json", "--dispatch", "--issue", "4"]);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /DISPATCH: #1 Dispatchable slice - fits scheduler plan; consumes 1 review capacity/);
+  assert.match(result.stdout, /SKIP: #4 Active issue still blocked - issue is missing the ready-for-agent label; add it to the GitHub issue to make the slice dispatchable/);
+  assert.match(result.stdout, /Requested issue #4 was not selected by this scheduler run\./);
+  assert.match(result.stdout, /Current decision for #4: SKIP - issue is missing the ready-for-agent label; add it to the GitHub issue to make the slice dispatchable/);
+  assert.match(result.stdout, /Fix that gating reason and rerun: pnpm ops schedule -- --queue \.ai\/queue\.json --dispatch --issue 4/);
+  assert.match(result.stdout, /If you must proceed outside the scheduler, create a manual dispatch with: pnpm ops dispatch -- --issue 4 --title "Active issue still blocked" --source manual --override-reason "Solo Operator approved scheduler mismatch"/);
 });
 
 
@@ -932,4 +1809,248 @@ test("run --prepare-worktree rejects branch-isolated dispatches", async () => {
 
   assert.notEqual(result.code, 0);
   assert.match(result.stderr, /requires a worktree-isolated dispatch/);
+});
+
+test("ralph initializes a durable run state and prints the first wave", async () => {
+  const cwd = await makeWorkspace();
+  const planDir = path.join(cwd, "docs", "agents", "loop-specs");
+  await mkdir(planDir, { recursive: true });
+  const planPath = path.join(planDir, "plan-44.json");
+  await writeFile(
+    planPath,
+    `${JSON.stringify(
+      {
+        schema_version: "ralph-run-plan/v1",
+        plan_id: "plan-44",
+        parent_issue: "44",
+        waves: [
+          {
+            wave_id: "wave-0",
+            issues: [
+              {
+                issue_id: "45",
+                title: "Validation gate",
+                worker_mode: "single",
+                retry_budget: 3,
+                verification_shape: ["node --test tests/validator.test.mjs"],
+              },
+            ],
+            rationale: "Hard gate first.",
+          },
+          {
+            wave_id: "wave-1",
+            parallel: true,
+            issues: [
+              {
+                issue_id: "46",
+                title: "Regeneration sidecar",
+                worker_mode: "parallel-worker-a",
+                retry_budget: 3,
+                verification_shape: ["node --test tests/regen.test.mjs"],
+              },
+              {
+                issue_id: "48",
+                title: "Wave planner",
+                worker_mode: "parallel-worker-b",
+                retry_budget: 3,
+                verification_shape: ["node --test tests/wave.test.mjs"],
+              },
+            ],
+            rationale: "Parallel sidecar wave.",
+          },
+        ],
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const result = await runOps(cwd, ["ralph", "--plan", planPath]);
+  assert.equal(result.code, 0);
+  const [statePath] = result.stdout.split(/\r?\n/).filter(Boolean);
+  const state = JSON.parse(await readFile(statePath, "utf8"));
+
+  assert.match(result.stdout, /# Ralph Run/);
+  assert.match(result.stdout, /Current wave: wave-0/);
+  assert.match(result.stdout, /#45 Validation gate/);
+  assert.equal(state.schema_version, "ralph-run-state/v1");
+  assert.equal(state.issue_states["45"].status, "pending");
+});
+
+test("ralph advances to the next wave after completion and preserves parallel runnable issues", async () => {
+  const cwd = await makeWorkspace();
+  const planDir = path.join(cwd, "docs", "agents", "loop-specs");
+  await mkdir(planDir, { recursive: true });
+  const planPath = path.join(planDir, "plan-44.json");
+  await writeFile(
+    planPath,
+    `${JSON.stringify(
+      {
+        schema_version: "ralph-run-plan/v1",
+        plan_id: "plan-44",
+        parent_issue: "44",
+        waves: [
+          {
+            wave_id: "wave-0",
+            issues: [{ issue_id: "45", title: "Validation gate", worker_mode: "single", retry_budget: 3 }],
+            rationale: "Hard gate first.",
+          },
+          {
+            wave_id: "wave-1",
+            parallel: true,
+            issues: [
+              { issue_id: "46", title: "Regeneration sidecar", worker_mode: "parallel-worker-a", retry_budget: 3 },
+              { issue_id: "48", title: "Wave planner", worker_mode: "parallel-worker-b", retry_budget: 3 },
+            ],
+            rationale: "Parallel sidecar wave.",
+          },
+        ],
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  let result = await runOps(cwd, ["ralph", "--plan", planPath, "--complete", "45"]);
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Current wave: wave-1/);
+  assert.match(result.stdout, /#46 Regeneration sidecar/);
+  assert.match(result.stdout, /#48 Wave planner/);
+
+  result = await runOps(cwd, ["ralph", "--plan", planPath, "--block", "46", "--reason", "Needs clarification"]);
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Wave-blocked issues:/);
+  assert.match(result.stdout, /#46 Regeneration sidecar \(Needs clarification\)/);
+  assert.match(result.stdout, /#48 Wave planner/);
+});
+
+test("ralph freeze suppresses runnable work until unfreeze", async () => {
+  const cwd = await makeWorkspace();
+  const planDir = path.join(cwd, "docs", "agents", "loop-specs");
+  await mkdir(planDir, { recursive: true });
+  const planPath = path.join(planDir, "plan-44.json");
+  await writeFile(
+    planPath,
+    `${JSON.stringify(
+      {
+        schema_version: "ralph-run-plan/v1",
+        plan_id: "plan-44",
+        parent_issue: "44",
+        waves: [
+          {
+            wave_id: "wave-0",
+            issues: [{ issue_id: "45", title: "Validation gate", worker_mode: "single", retry_budget: 3 }],
+            rationale: "Hard gate first.",
+          },
+        ],
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  let result = await runOps(cwd, ["ralph", "--plan", planPath, "--freeze", "--reason", "Shared foundation instability"]);
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Global status: frozen/);
+  assert.match(result.stdout, /Runnable issues:\n- None/);
+
+  result = await runOps(cwd, ["ralph", "--plan", planPath, "--unfreeze"]);
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Global status: active/);
+  assert.match(result.stdout, /#45 Validation gate/);
+});
+
+test("ralph writes a wave approval bundle and refuses to start unapproved work", async () => {
+  const cwd = await makeWorkspace();
+  const planDir = path.join(cwd, "docs", "agents", "loop-specs");
+  await mkdir(planDir, { recursive: true });
+  const planPath = path.join(planDir, "plan-50.json");
+  await writeFile(
+    planPath,
+    `${JSON.stringify(
+      {
+        schema_version: "ralph-run-plan/v1",
+        plan_id: "plan-50",
+        parent_issue: "50",
+        control_policy: {
+          approval_unit: "wave-bundle",
+          max_parallel_agents: 2,
+        },
+        waves: [
+          {
+            wave_id: "wave-4",
+            parallel: true,
+            rationale: "Approval and progression can run together.",
+            issues: [
+              {
+                issue_id: "50",
+                dag_node_id: "node-wave-approval",
+                title: "Add Wave-Bundle Approval",
+                verification_shape: ["node --test tests/wave-approval-plane.test.mjs"],
+                loop_spec: {
+                  loop_spec_id: "loop-spec-wave-approval",
+                  execution_contract: {
+                    stop_conditions: ["Stop when approval preview is green."],
+                    escalation_rules: ["Escalate on approval ambiguity."],
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  let result = await runOps(cwd, ["ralph", "--plan", planPath]);
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Wave approval status: pending/);
+  assert.match(result.stdout, /Wave approval bundle:/);
+
+  result = await runOps(cwd, ["ralph", "--plan", planPath, "--start", "50"]);
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /has not been approved/i);
+
+  const approvalDir = path.join(cwd, "docs", "agents", "approvals");
+  const approvalEntries = await readdir(approvalDir);
+  assert.ok(approvalEntries.some((entry) => entry.endsWith(".json")));
+  assert.ok(approvalEntries.some((entry) => entry.endsWith(".md")));
+});
+
+test("ralph approve-wave records durable approval and unlocks start", async () => {
+  const cwd = await makeWorkspace();
+  const planDir = path.join(cwd, "docs", "agents", "loop-specs");
+  await mkdir(planDir, { recursive: true });
+  const planPath = path.join(planDir, "plan-50.json");
+  await writeFile(
+    planPath,
+    `${JSON.stringify(
+      {
+        schema_version: "ralph-run-plan/v1",
+        plan_id: "plan-50",
+        parent_issue: "50",
+        control_policy: {
+          approval_unit: "wave-bundle",
+        },
+        waves: [
+          {
+            wave_id: "wave-4",
+            issues: [{ issue_id: "50", title: "Add Wave-Bundle Approval" }],
+          },
+        ],
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  let result = await runOps(cwd, ["ralph", "--plan", planPath, "--approve-wave", "wave-4", "--approved-by", "solo-operator"]);
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Wave approval status: approved/);
+
+  result = await runOps(cwd, ["ralph", "--plan", planPath, "--start", "50"]);
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /attempts 1\/0/);
 });

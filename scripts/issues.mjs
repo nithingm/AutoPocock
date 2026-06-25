@@ -1,6 +1,12 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { readdir } from "node:fs/promises";
+import { ensureApprovedPrd, renderPrdTightnessReport, validatePrdTightness } from "./lib/prd-plane.mjs";
+import { compileLayeredDag, renderLayeredDagMarkdown } from "./lib/layered-dag-compiler.mjs";
+import {
+  regenerateLayeredDag,
+  renderLayeredDagRegenerationMarkdown,
+} from "./lib/layered-dag-regeneration.mjs";
 
 const cwd = process.cwd();
 
@@ -26,48 +32,6 @@ function getArgs() {
   return { source };
 }
 
-function issueBlock(index, title) {
-  return `## Issue ${index}: ${title}
-
-### Outcome
-
-- Describe the user-visible or system-visible outcome.
-
-### Scope
-
-- Included:
-- Excluded:
-
-### Implementation Notes
-
-- Key files or modules:
-- Risks or dependencies:
-
-### Verification
-
-- Automated:
-- Manual:
-
-### Non-Goals
-
-- Explicitly state what this issue will not do.
-`;
-}
-
-function deriveIssueTitles(prdText) {
-  const checks = [...prdText.matchAll(/^- \[ \] (.+)$/gm)].map((match) => match[1].trim());
-
-  if (checks.length > 0) {
-    return checks.map((check, index) => `Deliver acceptance criterion ${index + 1}: ${check}`);
-  }
-
-  return [
-    "Establish the primary happy path",
-    "Cover validation and failure handling",
-    "Close QA and documentation gaps",
-  ];
-}
-
 async function resolvePrdPath(source) {
   if (source) {
     return path.isAbsolute(source) ? source : path.join(cwd, source);
@@ -86,39 +50,65 @@ async function resolvePrdPath(source) {
   return path.join(prdDir, files[0]);
 }
 
-function renderIssues(prdPath, prdText, issueTitles) {
-  const prdName = path.basename(prdPath);
-  const body = issueTitles.map((title, index) => issueBlock(index + 1, title)).join("\n");
+async function writePrdTightnessArtifacts({ prdPath, validation }) {
+  const date = new Date().toISOString().slice(0, 10);
+  const base = path.basename(prdPath, ".md");
+  const normalizedBase = base.replace(/^\d{4}-\d{2}-\d{2}-/, "");
+  const dir = path.join(cwd, "docs", "agents", "planning-validations");
+  const markdownTarget = path.join(dir, `${date}-${normalizedBase}-prd-tightness.md`);
+  const jsonTarget = path.join(dir, `${date}-${normalizedBase}-prd-tightness.json`);
 
-  return `# Issue Decomposition
+  await mkdir(dir, { recursive: true });
+  await writeFile(markdownTarget, renderPrdTightnessReport(validation), "utf8");
+  await writeFile(jsonTarget, `${JSON.stringify(validation, null, 2)}\n`, "utf8");
 
-Source PRD: ${prdName}
-
-## Decomposition Rules
-
-- Keep each issue independently testable.
-- Keep architecture decisions upstream of implementation.
-- Split by vertical slice, not by technical layer when possible.
-- Create follow-up bugs instead of silently expanding scope.
-
-${body}`;
+  return { markdownTarget, jsonTarget };
 }
 
 async function main() {
   const { source } = getArgs();
   const prdPath = await resolvePrdPath(source);
   const prdText = await readFile(prdPath, "utf8");
-  const issueTitles = deriveIssueTitles(prdText);
+  ensureApprovedPrd(prdText, prdPath);
+  const validation = validatePrdTightness(prdText, prdPath);
+  if (!validation.ok) {
+    const artifacts = await writePrdTightnessArtifacts({ prdPath, validation });
+    throw new Error(
+      [
+        `PRD tightness validation failed for ${prdPath}.`,
+        ...validation.failures.map((failure) => `- ${failure}`),
+        `Validation report: ${artifacts.markdownTarget}`,
+        `Validation JSON: ${artifacts.jsonTarget}`,
+      ].join("\n"),
+    );
+  }
   const date = new Date().toISOString().slice(0, 10);
   const base = path.basename(prdPath, ".md");
   const normalizedBase = base.replace(/^\d{4}-\d{2}-\d{2}-/, "");
   const dir = path.join(cwd, "issues");
-  const target = path.join(dir, `${date}-${normalizedBase}-issues.md`);
+  const markdownTarget = path.join(dir, `${date}-${normalizedBase}-issues.md`);
+  const jsonTarget = path.join(dir, `${date}-${normalizedBase}-issues.json`);
+  const regenerationMarkdownTarget = path.join(dir, `${date}-${normalizedBase}-issues-regeneration.md`);
+  const regenerationJsonTarget = path.join(dir, `${date}-${normalizedBase}-issues-regeneration.json`);
 
   await mkdir(dir, { recursive: true });
-  await writeFile(target, renderIssues(prdPath, prdText, issueTitles), "utf8");
+  let previousDag = null;
+  try {
+    previousDag = JSON.parse(await readFile(jsonTarget, "utf8"));
+  } catch {}
 
-  process.stdout.write(`${target}\n`);
+  const result = previousDag
+    ? regenerateLayeredDag({ prdPath, prdText, previousDag })
+    : { dag: compileLayeredDag({ prdPath, prdText }), diff: null };
+
+  await writeFile(markdownTarget, renderLayeredDagMarkdown(result.dag), "utf8");
+  await writeFile(jsonTarget, `${JSON.stringify(result.dag, null, 2)}\n`, "utf8");
+  if (result.diff) {
+    await writeFile(regenerationMarkdownTarget, renderLayeredDagRegenerationMarkdown(result.diff), "utf8");
+    await writeFile(regenerationJsonTarget, `${JSON.stringify(result.diff, null, 2)}\n`, "utf8");
+  }
+
+  process.stdout.write(`${markdownTarget}\n`);
 }
 
 main().catch((error) => {

@@ -7,14 +7,53 @@ function normalizeText(value) {
 function sectionBody(markdown, heading) {
   const text = normalizeText(markdown);
   const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = text.match(new RegExp(`^##\\s+${escaped}\\s*\\n([\\s\\S]*?)(?=^##\\s+|$)`, "m"));
-  return normalizeText(match?.[1] || "");
+  const headingMatch = new RegExp(`^##\\s+${escaped}\\s*$`, "m").exec(text);
+  if (!headingMatch) {
+    return "";
+  }
+
+  const start = headingMatch.index + headingMatch[0].length;
+  const rest = text.slice(start).replace(/^\n+/, "");
+  const nextHeadingIndex = rest.search(/^##\s+/m);
+  if (nextHeadingIndex === -1) {
+    return normalizeText(rest);
+  }
+
+  return normalizeText(rest.slice(0, nextHeadingIndex));
 }
 
 function extractBulletValue(body, label) {
   const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const match = body.match(new RegExp(`^-\\s*${escaped}:\\s*(.*)$`, "mi"));
   return normalizeText(match?.[1] || "");
+}
+
+function extractNestedBulletItems(body, label) {
+  const lines = normalizeText(body).split("\n");
+  const target = `${label}:`.toLowerCase();
+  const index = lines.findIndex((line) => line.trim().toLowerCase() === `- ${target}`);
+  if (index === -1) {
+    return [];
+  }
+
+  const items = [];
+  for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+    const line = lines[cursor];
+    if (!line.trim()) {
+      continue;
+    }
+
+    if (/^-\s+/.test(line)) {
+      break;
+    }
+
+    const nestedMatch = line.match(/^\s*-\s+(.*)$/);
+    if (nestedMatch) {
+      items.push(normalizeText(nestedMatch[1]));
+    }
+  }
+
+  return items.filter(Boolean);
 }
 
 function listFromValue(value) {
@@ -71,14 +110,22 @@ function classifyArtifact(markdown, artifactPath) {
 
 function summarizeHandoff(markdown) {
   const goal = listFromValue(sectionBody(markdown, "Goal")).join(" ");
-  const scope = listFromValue(sectionBody(markdown, "Boundaries"));
-  const verification = listFromValue(sectionBody(markdown, "Verification"));
+  const boundaries = sectionBody(markdown, "Boundaries");
+  const verificationBody = sectionBody(markdown, "Verification");
+  const inScope = extractNestedBulletItems(boundaries, "In scope");
+  const outOfScope = extractNestedBulletItems(boundaries, "Out of scope");
+  const automated = extractNestedBulletItems(verificationBody, "Automated");
+  const manual = extractNestedBulletItems(verificationBody, "Manual");
+  const evidence = extractNestedBulletItems(verificationBody, "Evidence expected");
 
   return [
     "Context handoff summary",
     goal && `Goal: ${clip(goal)}`,
-    scope.length > 0 && `Boundaries: ${clip(scope.join(" | "))}`,
-    verification.length > 0 && `Verification: ${clip(verification.join(" | "))}`,
+    inScope.length > 0 && `In scope: ${clip(inScope.join(" | "))}`,
+    outOfScope.length > 0 && `Out of scope: ${clip(outOfScope.join(" | "))}`,
+    automated.length > 0 && `Automated verification: ${clip(automated.join(" | "))}`,
+    manual.length > 0 && `Manual verification: ${clip(manual.join(" | "))}`,
+    evidence.length > 0 && `Evidence expected: ${clip(evidence.join(" | "))}`,
   ].filter(Boolean);
 }
 

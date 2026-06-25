@@ -1,2 +1,6 @@
 node_modules/
 docs/QA/*.generated.md
+.ai/provider-runs/
+.ai/ralph-runs/
+.ai/queue.json
+.ai/tmp-*.mjs

@@ -22,8 +22,24 @@ pnpm qa
 ```
 
 `pnpm ops` is the Guided Flow entrypoint. The lower-level commands remain available for Manual Mode.
+`pnpm ops console -- --port 4173` launches a local artifact-first workflow console over Setup, Context, PRD, Graph, Execution, and Review.
+`pnpm verify:project` runs the repeatable readiness check: setup, tests, console smoke, GitHub auth, and Project export visibility.
 
 The canonical operator walkthrough lives in `docs/agents/manual-walkthrough.md`. Use that file as the exact manual happy path. `README.md` is the top-level map; `docs/agents/workflow.md` is the contract summary.
+
+For the current repo/tracker/working-tree split, use `docs/agents/project-status.md`. For the map of which artifact owns which project knowledge, use `docs/agents/knowledge-map.md`.
+
+Two operator entry branches are now first-class:
+
+- new-feature path: start with `prd` and `issues`
+- existing-live-issue path: skip `prd` and `issues`, then start from `handoff` for the already-existing GitHub issue
+
+The late-stage pre-PR path is also intentional:
+
+- `pnpm ops review-prep` can run with `--issue` and the required review-gate inputs before a PR exists
+- `pnpm ops qa` can run with `--issue` only before a PR exists
+- `pnpm ops feedback` can run with `--issue` plus `--finding` before a PR exists
+- add `--pr` only when a PR already exists and you want that reference captured in the artifacts
 
 ## GitHub Setup Requirements
 

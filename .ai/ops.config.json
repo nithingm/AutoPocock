@@ -1,11 +1,11 @@
 {
   "tracker": "github",
   "github": {
-    "owner": "",
-    "repo": "",
-    "projectUrl": "",
+    "owner": "nithingm",
+    "repo": "AutoPocock",
+    "projectUrl": "https://github.com/users/nithingm/projects/1",
     "projectId": "",
-    "projectNumber": ""
+    "projectNumber": "1"
   },
   "domain": {
     "layout": "single-context",

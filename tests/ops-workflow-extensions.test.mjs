@@ -61,6 +61,79 @@ async function runOps(cwd, args) {
   }
 }
 
+async function writeDagFixture(cwd) {
+  const issuesDir = path.join(cwd, "issues");
+  await mkdir(issuesDir, { recursive: true });
+  const dagPath = path.join(issuesDir, "issue-dag.json");
+  const dag = {
+    schema_version: "issue-dag/v1",
+    source_prd: "example-prd.md",
+    source_prd_status: "approved",
+    source_context: "docs/agents/contexts/example.md",
+    nodes: [
+      {
+        id: "node-1",
+        title: "Foundation",
+        type: "foundation",
+        goal: "Ship the first slice",
+        depends_on: [],
+        acceptance_criteria: ["Foundation complete"],
+        verification_plan: {
+          automated: ["node --test", "pnpm test:integration"],
+          manual: ["Inspect artifact"],
+          evidence_expected: ["Integration verification stays green"],
+        },
+        write_surface: ["scripts/**"],
+        risk: "medium",
+        conflict_surface: "medium",
+        provider_eligible: true,
+        human_gate_required: false,
+        parallelizable: false,
+        status: "ready_for_handoff",
+        review_status: "pending",
+        qa_status: "pending",
+        conflict_reasoning: "Foundational node runs first.",
+      },
+      {
+        id: "node-2",
+        title: "Follow-on implementation",
+        type: "implementation",
+        goal: "Continue after node 1",
+        depends_on: ["node-1"],
+        acceptance_criteria: ["Follow-on complete"],
+        verification_plan: {
+          automated: ["node --test"],
+          manual: ["Inspect artifact"],
+        },
+        write_surface: ["docs/**"],
+        risk: "low",
+        conflict_surface: "low",
+        provider_eligible: true,
+        human_gate_required: false,
+        parallelizable: true,
+        status: "blocked_dependency",
+        review_status: "pending",
+        qa_status: "pending",
+        conflict_reasoning: "Depends on node 1.",
+      },
+    ],
+    edges: [{ from: "node-1", to: "node-2" }],
+    human_gated_nodes: [],
+    provider_eligible_nodes: ["node-1", "node-2"],
+    waves: [
+      { wave: 1, runnable_nodes: ["node-1"], blocked_nodes: [], reason: "Foundation." },
+      { wave: 2, runnable_nodes: ["node-2"], blocked_nodes: [], reason: "After foundation." },
+    ],
+    progression: {
+      completed_nodes: [],
+      runnable_nodes: ["node-1"],
+      blocked_nodes: ["node-2"],
+    },
+  };
+  await writeFile(dagPath, `${JSON.stringify(dag, null, 2)}\n`, "utf8");
+  return dagPath;
+}
+
 function makeCompletionReport({ issue, changedAreas = "scripts/ops.mjs", results = "Passing" }) {
   return `# Completion Report
 
@@ -97,6 +170,118 @@ test("init creates the durable memory proposals directory", async () => {
 
   assert.equal(result.code, 0);
   assert.ok(entries.includes("memory-proposals"));
+});
+
+test("setup reports one cross-platform readiness flow without mutating the workspace by default", async () => {
+  const cwd = await makeWorkspace({
+    github: {
+      owner: "example",
+      repo: "repo",
+      projectNumber: "7",
+    },
+  });
+
+  const result = await runOps(cwd, ["setup"]);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /# Setup Plane/);
+  assert.match(result.stdout, /Mode: dry-run/);
+  assert.match(result.stdout, /## Host/);
+  assert.match(result.stdout, /## Runtime Prerequisites/);
+  assert.match(result.stdout, /## GitHub Readiness/);
+  assert.match(result.stdout, /## Providers/);
+  assert.match(result.stdout, /## Workflow Structure/);
+  assert.match(result.stdout, /would create local directory docs\/PRDs|would create local directory docs\\PRDs/);
+  await assert.rejects(stat(path.join(cwd, "docs", "PRDs")));
+});
+
+test("setup --apply-init materializes the local workflow structure after reporting readiness", async () => {
+  const cwd = await makeWorkspace({
+    github: {
+      owner: "example",
+      repo: "repo",
+      projectNumber: "7",
+    },
+  });
+
+  const result = await runOps(cwd, ["setup", "--apply-init"]);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Mode: apply-init/);
+  assert.match(result.stdout, /created local directory docs\/PRDs|created local directory docs\\PRDs/);
+  assert.ok((await stat(path.join(cwd, "docs", "PRDs"))).isDirectory());
+  assert.ok((await stat(path.join(cwd, "docs", "agents", "loop-specs"))).isDirectory());
+});
+
+test("context artifacts must be approved before PRD generation can proceed", async () => {
+  const cwd = await makeWorkspace();
+  await writeFile(path.join(cwd, "CONTEXT.md"), "# Context\n\nShared domain language lives here.\n", "utf8");
+
+  const contextResult = await runOps(cwd, ["context", "--title", "Context gated feature"]);
+  assert.equal(contextResult.code, 0);
+  const contextPath = contextResult.stdout.trim();
+
+  const prdRejected = await runOps(cwd, ["prd", "--context", contextPath, "--title", "Context gated feature"]);
+  assert.notEqual(prdRejected.code, 0);
+  assert.match(prdRejected.stderr, /Planning requires approved context/);
+  assert.match(prdRejected.stderr, /context-approve/);
+
+  const approveContext = await runOps(cwd, ["context-approve", "--context", contextPath, "--approved-by", "solo-operator"]);
+  assert.equal(approveContext.code, 0);
+  const approvedContext = await readFile(contextPath, "utf8");
+  assert.match(approvedContext, /- Status: approved/);
+  assert.match(approvedContext, /- Approved by: solo-operator/);
+
+  const prdResult = await runOps(cwd, ["prd", "--context", contextPath, "--title", "Context gated feature"]);
+  assert.equal(prdResult.code, 0);
+  const prdPath = prdResult.stdout.trim();
+  const prdMarkdown = await readFile(prdPath, "utf8");
+  assert.match(prdMarkdown, /## Approval/);
+  assert.match(prdMarkdown, /- Status: draft/);
+  assert.match(prdMarkdown, new RegExp(contextPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("issue planning requires an approved PRD derived from approved context", async () => {
+  const cwd = await makeWorkspace();
+  await writeFile(path.join(cwd, "CONTEXT.md"), "# Context\n\nShared domain language lives here.\n", "utf8");
+
+  const contextResult = await runOps(cwd, ["context", "--title", "PRD approval feature"]);
+  const contextPath = contextResult.stdout.trim();
+  await runOps(cwd, ["context-approve", "--context", contextPath, "--approved-by", "solo-operator"]);
+
+  const prdResult = await runOps(cwd, ["prd", "--context", contextPath, "--title", "PRD approval feature"]);
+  const prdPath = prdResult.stdout.trim();
+
+  const draftIssues = await runOps(cwd, ["issues", "--prd", prdPath]);
+  assert.notEqual(draftIssues.code, 0);
+  assert.match(draftIssues.stderr, /Issue planning requires an approved PRD/);
+  assert.match(draftIssues.stderr, /prd-approve/);
+
+  const approvePrd = await runOps(cwd, ["prd-approve", "--prd", prdPath, "--approved-by", "solo-operator"]);
+  assert.equal(approvePrd.code, 0);
+  const approvedPrd = await readFile(prdPath, "utf8");
+  assert.match(approvedPrd, /- Status: approved/);
+  assert.match(approvedPrd, /- Approved by: solo-operator/);
+
+  const issuesResult = await runOps(cwd, ["issues", "--prd", prdPath]);
+  assert.equal(issuesResult.code, 0);
+  const issuesPath = issuesResult.stdout.trim();
+  const issuesMarkdown = await readFile(issuesPath, "utf8");
+  const issuesJsonPath = issuesPath.replace(/\.md$/, ".json");
+  const issuesJson = JSON.parse(await readFile(issuesJsonPath, "utf8"));
+  assert.match(issuesMarkdown, /# Issue DAG/);
+  assert.match(issuesMarkdown, /## Dependency Edges/);
+  assert.match(issuesMarkdown, /## Execution Waves/);
+  assert.match(issuesMarkdown, /Source PRD status: approved/);
+  assert.match(issuesMarkdown, /Source context:/);
+  assert.equal(issuesJson.schema_version, "issue-dag/v1");
+  assert.ok(Array.isArray(issuesJson.nodes));
+  assert.ok(issuesJson.nodes.length >= 1);
+  assert.ok(Array.isArray(issuesJson.waves));
+  assert.ok(issuesJson.waves.length >= 1);
+  assert.ok("provider_eligible" in issuesJson.nodes[0]);
+  assert.ok("human_gate_required" in issuesJson.nodes[0]);
+  assert.ok("write_surface" in issuesJson.nodes[0]);
 });
 
 test("review-prep fails with explicit gate messages when required inputs are missing", async () => {
@@ -365,4 +550,267 @@ test("feedback prints a dry-run classification without mutating GitHub", async (
   assert.match(markdown, /# Feedback Summary/);
   assert.ok((await stat(jsonPath)).isFile());
   assert.ok((await stat(markdownPath)).isFile());
+});
+
+test("review-decision approve moves a node into QA and writes a review artifact", async () => {
+  const cwd = await makeWorkspace();
+  const dagPath = await writeDagFixture(cwd);
+
+  const result = await runOps(cwd, [
+    "review-decision",
+    "--dag",
+    dagPath,
+    "--issue",
+    "31",
+    "--node",
+    "node-1",
+    "--decision",
+    "approve",
+    "--approved-by",
+    "solo-operator",
+    "--reason",
+    "Meets review bar",
+  ]);
+
+  assert.equal(result.code, 0);
+  const updated = JSON.parse(await readFile(dagPath, "utf8"));
+  assert.equal(updated.nodes[0].status, "qa");
+  assert.equal(updated.nodes[0].review_status, "approved");
+  assert.deepEqual(updated.progression.runnable_nodes, []);
+
+  const reviewDir = path.join(cwd, "docs", "agents", "reviews");
+  const artifacts = await readdir(reviewDir);
+  const markdown = await readFile(path.join(reviewDir, artifacts[0]), "utf8");
+  assert.match(markdown, /# Review Decision/);
+  assert.match(markdown, /- Decision: approve/);
+});
+
+test("review-decision reject reopens the node for handoff", async () => {
+  const cwd = await makeWorkspace();
+  const dagPath = await writeDagFixture(cwd);
+
+  const result = await runOps(cwd, [
+    "review-decision",
+    "--dag",
+    dagPath,
+    "--issue",
+    "31",
+    "--node",
+    "node-1",
+    "--decision",
+    "reject",
+    "--approved-by",
+    "solo-operator",
+    "--reason",
+    "Needs another pass",
+  ]);
+
+  assert.equal(result.code, 0);
+  const updated = JSON.parse(await readFile(dagPath, "utf8"));
+  assert.equal(updated.nodes[0].status, "ready_for_handoff");
+  assert.equal(updated.nodes[0].review_status, "rejected");
+  assert.equal(updated.nodes[0].qa_status, "pending");
+  assert.deepEqual(updated.progression.runnable_nodes, ["node-1"]);
+});
+
+test("qa-decision pass completes a node and unlocks dependents", async () => {
+  const cwd = await makeWorkspace();
+  const dagPath = await writeDagFixture(cwd);
+
+  await runOps(cwd, [
+    "review-decision",
+    "--dag",
+    dagPath,
+    "--issue",
+    "31",
+    "--node",
+    "node-1",
+    "--decision",
+    "approve",
+    "--approved-by",
+    "solo-operator",
+  ]);
+
+  const result = await runOps(cwd, [
+    "qa-decision",
+    "--dag",
+    dagPath,
+    "--issue",
+    "31",
+    "--node",
+    "node-1",
+    "--decision",
+    "pass",
+    "--approved-by",
+    "solo-operator",
+    "--reason",
+    "Tests passed",
+    "--changed-outputs",
+    "scripts/ops.mjs|tests/ops-workflow-extensions.test.mjs",
+    "--verification-commands",
+    "node --test|pnpm test:integration",
+    "--verification-results",
+    "Unit checks passed|Integration checks passed",
+    "--acceptance-evidence",
+    "Foundation complete=>Unit and integration checks passed",
+    "--test-evidence",
+    "unit:pass:Unit checks passed|integration:pass:Integration checks passed",
+  ]);
+
+  assert.equal(result.code, 0);
+  const updated = JSON.parse(await readFile(dagPath, "utf8"));
+  assert.equal(updated.nodes[0].status, "done");
+  assert.equal(updated.nodes[0].qa_status, "passed");
+  assert.equal(updated.nodes[0].validation_status, "passed");
+  assert.equal(updated.nodes[1].status, "ready_for_handoff");
+  assert.deepEqual(updated.progression.completed_nodes, ["node-1"]);
+  assert.deepEqual(updated.progression.runnable_nodes, ["node-2"]);
+
+  const qaDir = path.join(cwd, "docs", "QA");
+  const artifacts = await readdir(qaDir);
+  const markdown = await readFile(path.join(qaDir, artifacts[0]), "utf8");
+  assert.match(markdown, /# QA Decision/);
+  assert.match(markdown, /- Decision: pass/);
+});
+
+test("qa-decision pass refuses to unlock without completion evidence", async () => {
+  const cwd = await makeWorkspace();
+  const dagPath = await writeDagFixture(cwd);
+
+  await runOps(cwd, [
+    "review-decision",
+    "--dag",
+    dagPath,
+    "--issue",
+    "31",
+    "--node",
+    "node-1",
+    "--decision",
+    "approve",
+    "--approved-by",
+    "solo-operator",
+  ]);
+
+  const result = await runOps(cwd, [
+    "qa-decision",
+    "--dag",
+    dagPath,
+    "--issue",
+    "31",
+    "--node",
+    "node-1",
+    "--decision",
+    "pass",
+    "--approved-by",
+    "solo-operator",
+  ]);
+
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /Completion evidence is incomplete/);
+  assert.match(result.stderr, /missing changed outputs/);
+  assert.match(result.stderr, /missing integration test evidence/);
+});
+
+test("qa-decision validation-fail records evidence and keeps dependents blocked", async () => {
+  const cwd = await makeWorkspace();
+  const dagPath = await writeDagFixture(cwd);
+
+  await runOps(cwd, [
+    "review-decision",
+    "--dag",
+    dagPath,
+    "--issue",
+    "31",
+    "--node",
+    "node-1",
+    "--decision",
+    "approve",
+    "--approved-by",
+    "solo-operator",
+  ]);
+
+  const result = await runOps(cwd, [
+    "qa-decision",
+    "--dag",
+    dagPath,
+    "--issue",
+    "31",
+    "--node",
+    "node-1",
+    "--decision",
+    "validation-fail",
+    "--approved-by",
+    "solo-operator",
+    "--reason",
+    "Local tests passed but integration failed",
+    "--changed-outputs",
+    "scripts/ops.mjs",
+    "--verification-commands",
+    "node --test|pnpm test:integration",
+    "--verification-results",
+    "Unit checks passed|Integration checks failed",
+    "--acceptance-evidence",
+    "Foundation complete=>Local work landed but integration regressed",
+    "--test-evidence",
+    "unit:pass:Unit checks passed|integration:fail:Integration checks failed",
+  ]);
+
+  assert.equal(result.code, 0);
+  const updated = JSON.parse(await readFile(dagPath, "utf8"));
+  assert.equal(updated.nodes[0].status, "validation_failed");
+  assert.equal(updated.nodes[0].qa_status, "validation_failed");
+  assert.equal(updated.nodes[0].validation_status, "failed");
+  assert.equal(updated.nodes[1].status, "blocked_dependency");
+  assert.deepEqual(updated.progression.runnable_nodes, []);
+});
+
+test("qa-decision fail records bug-loop state and writes a follow-up bug artifact", async () => {
+  const cwd = await makeWorkspace();
+  const dagPath = await writeDagFixture(cwd);
+
+  await runOps(cwd, [
+    "review-decision",
+    "--dag",
+    dagPath,
+    "--issue",
+    "31",
+    "--node",
+    "node-1",
+    "--decision",
+    "approve",
+    "--approved-by",
+    "solo-operator",
+  ]);
+
+  const result = await runOps(cwd, [
+    "qa-decision",
+    "--dag",
+    dagPath,
+    "--issue",
+    "31",
+    "--node",
+    "node-1",
+    "--decision",
+    "fail",
+    "--approved-by",
+    "solo-operator",
+    "--reason",
+    "Regression found",
+  ]);
+
+  assert.equal(result.code, 0);
+  const updated = JSON.parse(await readFile(dagPath, "utf8"));
+  assert.equal(updated.nodes[0].status, "bug_loop");
+  assert.equal(updated.nodes[0].qa_status, "failed");
+
+  const feedbackDir = path.join(cwd, "docs", "agents", "feedback");
+  const artifacts = await readdir(feedbackDir);
+  assert.equal(artifacts.length, 2);
+  const jsonPath = artifacts.find((entry) => entry.endsWith(".json"));
+  const mdPath = artifacts.find((entry) => entry.endsWith(".md"));
+  const json = JSON.parse(await readFile(path.join(feedbackDir, jsonPath), "utf8"));
+  const markdown = await readFile(path.join(feedbackDir, mdPath), "utf8");
+  assert.equal(json.classification, "follow-up-bug");
+  assert.equal(json.node_id, "node-1");
+  assert.match(markdown, /# Follow-up Bug Draft/);
 });

@@ -4,6 +4,8 @@ The Solo Operator can use the Umbrella CLI for Guided Flow or low-level commands
 
 For the canonical end-to-end manual happy path, use `docs/agents/manual-walkthrough.md` as the primary **Workflow Artifact**. This file is the summary contract; the walkthrough owns the exact operator sequence.
 
+For the current distinction between landed code, local implementation work, and live GitHub tracker state, use `docs/agents/project-status.md`. For a concise map of which Workflow Artifact owns which kind of project knowledge, use `docs/agents/knowledge-map.md`.
+
 ## Canonical Story
 
 The manual operating system is GitHub-backed but artifact-led.
@@ -12,6 +14,11 @@ The manual operating system is GitHub-backed but artifact-led.
 - Repo markdown under `docs/` and `issues/` carries the rich working context.
 - `pnpm ops` commands generate or validate those artifacts, but several GitHub setup steps remain manual in the current product shape.
 - The documented split from issue #13 is final for this phase: TDD stays a doc contract, `skills/engineering/` owns reusable agent workflows, `.ai/prompts/` owns reusable prompt content, and `prompts/` stays the wrapper layer.
+
+The operator has two valid entry branches:
+
+- new-feature planning path: `setup -> context -> context-approve -> prd -> prd-approve -> issues -> handoff -> ...`
+- existing-live-issue path: `setup -> handoff -> ...` when the GitHub issue already exists and PRD/issues creation is intentionally skipped
 
 ## Guided Flow
 
@@ -24,20 +31,26 @@ pnpm ops
 The Umbrella CLI stages the workflow:
 
 - `pnpm ops init`: provision local workflow structure and configuration without executing workers
-- `pnpm ops prd -- --title "Feature Name"`: create a PRD artifact
-- `pnpm ops issues`: create issue slices from the latest PRD
+- `pnpm ops setup`: report OS, shell, provider readiness, GitHub readiness, runtime prerequisites, and workflow-structure status in one dry-run-first flow; add `--apply-init` to materialize missing local directories
+- `pnpm ops context -- --title "Feature Name"`: create a durable shared-context artifact in draft state
+- `pnpm ops context-approve -- --context docs/agents/contexts/file.md --approved-by solo-operator`: mark a shared-context artifact approved so planning may continue
+- `pnpm ops prd -- --context docs/agents/contexts/file.md --title "Feature Name"`: create a PRD artifact from approved context
+- `pnpm ops prd-approve -- --prd docs/PRDs/file.md --approved-by solo-operator`: mark a PRD approved so issue planning may continue
+- `pnpm ops issues -- --prd docs/PRDs/file.md`: create an Issue DAG markdown artifact plus canonical JSON from an approved PRD
 - `pnpm ops handoff -- --issue 123 --title "Implement slice"`: create a handoff artifact
 - `pnpm ops hitl -- --issue 123 --title "Provision API token"`: create a prepared human step artifact
 - `pnpm ops complete -- --issue 123 --status "needs human review"`: create a completion report
-- `pnpm ops review-prep -- --issue 123 --pr 456 --completion docs/agents/completions/file.md --acceptance "criterion 1|criterion 2" --dependency-changes "None" --local-refactors "None"`: validate the Review Entry Gate and create advisory review prep only when required inputs are explicit
+- `pnpm ops review-prep -- --issue 123 --completion docs/agents/completions/file.md --acceptance "criterion 1|criterion 2" --dependency-changes "None" --local-refactors "None"`: validate the Review Entry Gate and create advisory review prep only when required inputs are explicit; add `--pr 456` only when a PR already exists
+- `pnpm ops review-decision -- --dag issues/file.json --issue 123 --node node-1 --decision approve --approved-by solo-operator`: apply an explicit review approval or rejection to a DAG node and write a durable review decision artifact
+- `pnpm ops qa-decision -- --dag issues/file.json --issue 123 --node node-1 --decision pass --approved-by solo-operator`: apply an explicit QA pass or fail to a DAG node, write a QA decision artifact, and create a follow-up bug draft automatically on QA failure
 - `pnpm ops memory-propose -- --type workflow --title "Update workflow contract" --rationale "Why this belongs in durable memory" --target-files "docs/agents/workflow.md|CONTEXT.md" --suggested-text "Proposed durable memory text" --accept-risk "Risk if accepted" --reject-risk "Risk if rejected"`: create durable memory proposal artifacts without editing durable memory directly
 - `pnpm ops mirror -- --artifact docs/agents/handoffs/file.md --issue 123`: dry-run a selective GitHub comment mirror for supported workflow artifacts
-- `pnpm ops feedback -- --issue 123 --pr 456 --finding "QA finding text"`: classify a QA finding into a Same-PR Fix candidate or a new bug draft, and write a local feedback artifact without mutating GitHub
+- `pnpm ops feedback -- --issue 123 --finding "QA finding text"`: classify a QA finding into a Same-PR Fix candidate or a new bug draft, and write a local feedback artifact without mutating GitHub; add `--pr 456` only when a PR already exists
 - `pnpm ops dispatch -- --issue 123 --title "Implement slice" --source manual --override-reason "Solo Operator approved"`: create dispatch-ready artifacts without calling a subagent
 - `pnpm ops claim -- --dispatch docs/agents/dispatches/dispatch-id.json --claimed-by runner-name --isolation-mode worktree`: claim a queued dispatch artifact
 - `pnpm ops claim-status -- --dispatch docs/agents/dispatches/dispatch-id.json --max-age-hours 24`: inspect whether a claimed dispatch looks stale
 - `pnpm ops reclaim -- --dispatch docs/agents/dispatches/dispatch-id.json --approved-by solo-operator --reason "Runner abandoned work"`: explicitly return a claimed dispatch to `queued`
-- `pnpm ops qa -- --issue 123 --pr 456`: generate targeted QA for tracked work
+- `pnpm ops qa -- --issue 123`: generate targeted QA for tracked work; add `--pr 456` only when a PR already exists and you want it called out in the checklist
 - `pnpm ops qa`: generate generic QA from recent commits
 - `pnpm ops board`: print the board, lane, and scheduler contract
 - `pnpm ops schedule -- --queue .ai/queue.example.json`: print a dry-run Scheduler Plan
@@ -46,11 +59,14 @@ The Umbrella CLI stages the workflow:
 - `pnpm ops github:export`: export non-`Done` GitHub Project issues into `.ai/queue.json`
 - `pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json`: validate a claimed dispatch without invoking a provider
 - `pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --prepare-worktree`: prepare the local worktree directory for a claimed worktree dispatch, then print the Runner Plan
+- `pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --execute`: execute from the approved Loop Spec, persist Provider Run metadata plus stdout/stderr logs, and enforce runtime stop/escalation conditions
+- `pnpm ops console -- --port 4173 --host 127.0.0.1`: launch the local workflow console UI over the same artifact and gate contracts the CLI uses
 
 ## GitHub Setup Requirements
 
 GitHub-backed flow depends on a real project configuration, not just local files.
 
+- `pnpm ops setup` is the top-level readiness check for local structure, host environment, provider availability, and GitHub config/auth state.
 - `.ai/ops.config.json` must contain the intended GitHub owner, repo, and Project reference.
 - `gh` must be installed and authenticated before `pnpm ops github:init`, `pnpm ops github:export`, or `pnpm ops mirror -- --apply`.
 - `pnpm ops github:init` is a bootstrap report by default. With `-- --apply`, validated behavior is limited to creating missing canonical labels.
@@ -74,16 +90,29 @@ The optional fields currently documented are `Review Capacity Cost`, `Runner`, `
 
 The workflow is only coherent when each command hands off to the next artifact cleanly:
 
-1. `pnpm ops prd` writes the PRD in `docs/PRDs/`.
-2. `pnpm ops issues` turns that PRD into bounded slice drafts in `issues/`.
-3. `pnpm ops handoff` creates the slice handoff in `docs/agents/handoffs/`.
-4. `pnpm ops github:export` snapshots non-`Done` tracker items into `.ai/queue.json`.
-5. `pnpm ops schedule -- --dispatch` writes a scheduler plan, then dispatch artifacts for `DISPATCH` decisions only.
-6. `pnpm ops claim` and `pnpm ops run -- --prepare-worktree` move one dispatch into a claimed, locally prepared execution context.
-7. `pnpm ops complete` writes the completion report for the implemented slice.
-8. `pnpm ops review-prep` validates the Review Entry Gate and writes review prep only when the slice is fully described.
-9. `pnpm ops qa` writes targeted QA output for the slice.
-10. `pnpm ops feedback` classifies any finding as a Same-PR candidate or a new bug draft without mutating GitHub by default.
+1. `pnpm ops context` writes draft shared context in `docs/agents/contexts/`.
+2. `pnpm ops context-approve` marks that context approved.
+3. `pnpm ops prd` writes the PRD in `docs/PRDs/` from approved context only.
+4. `pnpm ops prd-approve` marks that PRD approved.
+5. `pnpm ops issues` turns that approved PRD into an Issue DAG with node metadata, dependency edges, and execution waves in `issues/`.
+6. `pnpm ops handoff` creates the slice handoff in `docs/agents/handoffs/`.
+7. `pnpm ops github:export` snapshots non-`Done` tracker items into `.ai/queue.json`.
+8. `pnpm ops schedule -- --dispatch` writes a scheduler plan, then dispatch artifacts for `DISPATCH` decisions only.
+9. `pnpm ops claim` and `pnpm ops run -- --prepare-worktree` move one dispatch into a claimed, locally prepared execution context.
+10. `pnpm ops complete` writes the completion report for the implemented slice.
+11. `pnpm ops review-prep` validates the Review Entry Gate and writes review prep only when the slice is fully described.
+12. `pnpm ops review-decision` records Solo Operator review approval or rejection against the DAG node.
+13. `pnpm ops qa` writes targeted QA output for the slice.
+14. `pnpm ops qa-decision` records QA pass or fail against the DAG node, reopens failed work into a bug loop, and unlocks dependents only when progression rules are satisfied.
+15. `pnpm ops feedback` classifies any finding as a Same-PR candidate or a new bug draft without mutating GitHub by default.
+16. `pnpm ops console` provides an artifact-first UI over Setup, Context, PRD, Graph, Execution, and Review without replacing repo truth.
+
+The late-stage pre-PR path is intentional:
+
+- `review-prep` can run with `--issue` only plus the required gate inputs
+- `qa` can run with `--issue` only for strict targeted QA
+- `feedback` can run with `--issue` plus `--finding`
+- add `--pr` to any of those commands only after a PR exists
 
 ## TDD
 
@@ -97,11 +126,23 @@ TDD is part of implementation and bug-fix execution, not a separate Execution St
 - It fails with explicit missing-input messages when the Review Entry Gate is incomplete.
 - It writes advisory Review Prep only when the gate passes.
 
+## Decision Gates
+
+Review and QA progression are now durable workflow transitions, not implicit human memory.
+
+- `pnpm ops review-decision` requires `--approved-by` and records either `approve` or `reject` on the target DAG node.
+- Review approval moves a node into `qa`.
+- Review rejection reopens the node to `ready_for_handoff`.
+- `pnpm ops qa-decision` requires prior review approval and records either `pass` or `fail`.
+- QA pass moves the node to `done` and unlocks dependents only when all dependencies are complete.
+- QA fail moves the node to `bug_loop` and creates a follow-up bug draft under `docs/agents/feedback/`.
+
 ## Targeted QA
 
-`pnpm ops qa -- --issue <id> --pr <ref>` is strict by default for AFK workflow.
+`pnpm ops qa -- --issue <id>` is strict by default for AFK workflow.
 
-- Issue and PR identifiers are required unless `--manual` is supplied.
+- `--issue` is required unless `--manual` is supplied.
+- `--pr` is optional late-stage context when a PR already exists.
 - Missing handoff or completion context is a workflow failure, not a soft warning.
 - Missing Review Prep remains a warning.
 - Oversized or unclear work is reported as needing slicing and blocks a strict QA pass.
@@ -124,7 +165,7 @@ TDD is part of implementation and bug-fix execution, not a separate Execution St
 - It creates Dispatch Artifacts only for items that resolved to `DISPATCH`.
 - It does not mutate GitHub or invoke providers.
 - Scheduler-sourced dispatch artifacts default to `worktree` isolation.
-- Manual `pnpm ops dispatch` exists, but validated behavior is still rough. If you use it, pass `--handoff <exact path>` explicitly and inspect the generated JSON before treating it as dispatchable.
+- Manual `pnpm ops dispatch` requires an exact matching handoff artifact. If auto-resolution cannot find one unambiguous issue-matching handoff, pass `--handoff <exact path>` explicitly or create the handoff first.
 
 ## What You Need To Do
 

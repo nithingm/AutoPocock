@@ -12,13 +12,20 @@ test("summarizeArtifact produces a bounded handoff summary", () => {
 
 ## Boundaries
 
-- In scope: mirror handoffs and completions
-- Out of scope: full scheduler plans
+- In scope:
+  - mirror handoffs and completions
+  - keep comments decision-useful
+- Out of scope:
+  - full scheduler plans
 
 ## Verification
 
-- Automated: node --test
-- Manual: inspect dry-run output
+- Automated:
+  - node --test
+- Manual:
+  - inspect dry-run output
+- Evidence expected:
+  - comment body contains meaningful summary lines
 `;
 
   const summary = summarizeArtifact("docs/agents/handoffs/issue-5.md", markdown);
@@ -26,8 +33,48 @@ test("summarizeArtifact produces a bounded handoff summary", () => {
   assert.equal(summary.kind, "handoff");
   assert.match(summary.lines.join("\n"), /Context handoff summary/);
   assert.match(summary.lines.join("\n"), /Goal:/);
-  assert.match(summary.lines.join("\n"), /Boundaries:/);
-  assert.match(summary.lines.join("\n"), /Verification:/);
+  assert.match(summary.lines.join("\n"), /In scope: .*mirror handoffs and completions/);
+  assert.match(summary.lines.join("\n"), /Out of scope: .*full scheduler plans/);
+  assert.match(summary.lines.join("\n"), /Automated verification: .*node --test/);
+  assert.match(summary.lines.join("\n"), /Manual verification: .*inspect dry-run output/);
+  assert.match(summary.lines.join("\n"), /Evidence expected: .*meaningful summary lines/);
+});
+
+test("summarizeArtifact preserves nested handoff details from the tracer-bullet handoff shape", () => {
+  const markdown = `# Context Handoff
+
+## Goal
+
+- Deliver one thin, demoable end-to-end path.
+
+## Boundaries
+
+- In scope:
+  - Define the smallest real vertical slice.
+  - Reuse the existing workflow where possible.
+- Out of scope:
+  - Full workflow-console UI work.
+  - Multi-provider support.
+
+## Verification
+
+- Automated:
+  - Add or update tests for the tracer-bullet flow.
+  - Cover one bounded launch-planning path.
+- Manual:
+  - Run the documented tracer-bullet path.
+- Evidence expected:
+  - Commands run and results
+  - Paths to generated artifacts
+`;
+
+  const summary = summarizeArtifact("docs/agents/handoffs/issue-23.md", markdown);
+
+  assert.match(summary.lines.join("\n"), /In scope: .*smallest real vertical slice/);
+  assert.match(summary.lines.join("\n"), /Out of scope: .*Full workflow-console UI work/);
+  assert.match(summary.lines.join("\n"), /Automated verification: .*Add or update tests/);
+  assert.match(summary.lines.join("\n"), /Manual verification: .*Run the documented tracer-bullet path/);
+  assert.match(summary.lines.join("\n"), /Evidence expected: .*Paths to generated artifacts/);
 });
 
 test("summarizeArtifact rejects full scheduler plans by default", () => {

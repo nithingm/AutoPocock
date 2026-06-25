@@ -1,0 +1,243 @@
+{
+  "schema_version": "ralph-run-plan/v1",
+  "plan_id": "ralph-run-plan-issue-44-2026-05-14",
+  "parent_issue": "44",
+  "title": "Issue #44 Multi-Wave Ralph Execution Plan",
+  "feature_track": "topologically-sorted-dag-planning-and-graph-driven-ralph-loop-orchestration",
+  "source_prd": "D:\\Projects\\AutoPocock\\docs\\PRDs\\2026-05-14-topologically-sorted-dag-planning-and-graph-driven-ralph-loop-orchestration.md",
+  "source_issue_decomposition": "D:\\Projects\\AutoPocock\\issues\\2026-05-14-topologically-sorted-dag-planning-and-graph-driven-ralph-loop-orchestration-issues.md",
+  "control_policy": {
+    "approval_unit": "wave-bundle",
+    "default_execution_unit": "one-issue-one-ralph-loop",
+    "max_parallel_agents": 2,
+    "branch_local_pause_default": true,
+    "full_run_freeze_only_for_shared_foundation": true,
+    "shared_foundation_triggers": [
+      "shared schema instability",
+      "unstable shared contracts",
+      "broken global build or runtime environment",
+      "architecture contradiction",
+      "missed broad write-surface overlap",
+      "incorrect accepted dependency structure"
+    ],
+    "default_pass_shape": [
+      "inspect",
+      "implement",
+      "verify",
+      "record-evidence",
+      "decide-continue-or-stop"
+    ],
+    "default_stop_conditions": [
+      "Acceptance criteria are satisfied and verification is green.",
+      "A hard blocker, scope violation, or retry-budget exhaustion is reached.",
+      "Required approval or artifact is missing."
+    ],
+    "default_escalation_conditions": [
+      "Graph-contract ambiguity",
+      "Write-surface expansion beyond the approved slice",
+      "Repeated failure of the same acceptance criterion"
+    ]
+  },
+  "waves": [
+    {
+      "wave_id": "wave-0",
+      "issues": [
+        {
+          "issue_id": "45",
+          "title": "Add PRD Tightness Validation Before DAG Compilation",
+          "worker_mode": "single",
+          "retry_budget": 3,
+          "verification_shape": [
+            "Validator fixture tests",
+            "pnpm ops issues pass-fail checks against strong and weak fixture PRDs"
+          ]
+        }
+      ],
+      "rationale": "Hard gate for all downstream graph work."
+    },
+    {
+      "wave_id": "wave-1",
+      "issues": [
+        {
+          "issue_id": "47",
+          "title": "Make the DAG the Topologically Sorted Execution Authority",
+          "worker_mode": "single",
+          "retry_budget": 3,
+          "verification_shape": [
+            "Topological-order and readiness fixture tests",
+            "Workflow proof that downstream consumers read DAG authority"
+          ]
+        }
+      ],
+      "rationale": "Canonical execution authority must exist before parallel sidecars are safe."
+    },
+    {
+      "wave_id": "wave-2",
+      "parallel": true,
+      "issues": [
+        {
+          "issue_id": "48",
+          "title": "Add Wave Planning With Write-Surface and Conflict-Safe Parallelism",
+          "worker_mode": "parallel-worker-a",
+          "retry_budget": 3,
+          "verification_shape": [
+            "Dependency-overlap-priority fixture matrix",
+            "Deterministic scheduler output checks"
+          ]
+        },
+        {
+          "issue_id": "46",
+          "title": "Regenerate DAGs With Diffing, Edit Preservation, and Provenance",
+          "worker_mode": "parallel-worker-b",
+          "retry_budget": 3,
+          "verification_shape": [
+            "Round-trip DAG regeneration tests",
+            "Edit preservation and stale-marking checks"
+          ]
+        }
+      ],
+      "branch_local_pause_on": [
+        "Canonical node fields change underneath the scheduler",
+        "Write-surface metadata changes invalidate scheduler assumptions"
+      ],
+      "rationale": "Both depend on the post-#47 DAG contract but mostly diverge into scheduling versus regeneration."
+    },
+    {
+      "wave_id": "wave-3",
+      "issues": [
+        {
+          "issue_id": "49",
+          "title": "Compile Explicit Ralph Loop Specs From Approved DAG Nodes",
+          "worker_mode": "single",
+          "retry_budget": 3,
+          "verification_shape": [
+            "Loop-spec compilation tests from approved DAG fixtures",
+            "Generated artifact assertions"
+          ]
+        }
+      ],
+      "rationale": "Tracer-bullet checkpoint for the execution model."
+    },
+    {
+      "wave_id": "wave-4",
+      "parallel": true,
+      "issues": [
+        {
+          "issue_id": "50",
+          "title": "Add Wave-Bundle Approval for Graph-Driven Execution",
+          "worker_mode": "parallel-worker-a",
+          "retry_budget": 2,
+          "verification_shape": [
+            "Approval bundle artifact tests",
+            "Preview flow and approval enforcement checks"
+          ]
+        },
+        {
+          "issue_id": "52",
+          "title": "Enforce Evidence-Based Completion, Multidimensional Testing, and Validation-Failed Progression",
+          "worker_mode": "parallel-worker-b",
+          "retry_budget": 2,
+          "verification_shape": [
+            "Completion-review-QA state transition tests",
+            "Evidence-field and validation-failed artifact checks"
+          ]
+        }
+      ],
+      "branch_local_pause_on": [
+        "Completion-state vocabulary diverges between approval and progression paths"
+      ],
+      "rationale": "Both consume the loop-spec contract but cover pre-execution approval versus post-execution progression."
+    },
+    {
+      "wave_id": "wave-5",
+      "issues": [
+        {
+          "issue_id": "51",
+          "title": "Add Preflight Feasibility Validation and Dynamic Wave Splitting",
+          "worker_mode": "single",
+          "retry_budget": 2,
+          "verification_shape": [
+            "Infeasible-node and split-wave fixture scenarios",
+            "Dry-run proof that safe nodes still launch"
+          ]
+        }
+      ],
+      "rationale": "Needs approved bundles and stable loop specs before feasibility logic is trustworthy."
+    },
+    {
+      "wave_id": "wave-6",
+      "issues": [
+        {
+          "issue_id": "53",
+          "title": "Auto-Insert Bug-Loop Repair Issues With Escalation Caps",
+          "worker_mode": "single",
+          "retry_budget": 1,
+          "verification_shape": [
+            "Integration-failure and descendant-cap scenarios",
+            "Write-surface expansion escalation checks"
+          ]
+        }
+      ],
+      "rationale": "First hard convergence point for preflight failure and validation failure."
+    },
+    {
+      "wave_id": "wave-7",
+      "issues": [
+        {
+          "issue_id": "54",
+          "title": "Add Branch-Local Pause and Shared-Foundation Full-Run Freeze Rules",
+          "worker_mode": "single",
+          "retry_budget": 1,
+          "verification_shape": [
+            "Branch-only versus full-run freeze scenarios",
+            "Durable pause or freeze reason output"
+          ]
+        }
+      ],
+      "rationale": "Depends on real repair and escalation behavior rather than hypothetical failure handling."
+    },
+    {
+      "wave_id": "wave-8",
+      "issues": [
+        {
+          "issue_id": "55",
+          "title": "Orchestrate Multi-Stage Single Runs From Connected Wave Bundles",
+          "worker_mode": "single-with-optional-verifier",
+          "retry_budget": 2,
+          "verification_shape": [
+            "End-to-end staged-run tracer bullet",
+            "Pause-resume-repair-stage progression checks"
+          ]
+        }
+      ],
+      "rationale": "Final composition layer for approved bundles, feasibility, progression, repair, and pause-freeze semantics."
+    }
+  ],
+  "dependency_spine": [
+    "45",
+    "47",
+    "48",
+    "49",
+    "50",
+    "51",
+    "53",
+    "54",
+    "55"
+  ],
+  "parallel_side_paths": [
+    {
+      "after_issue": "47",
+      "parallel_issues": [
+        "48",
+        "46"
+      ]
+    },
+    {
+      "after_issue": "49",
+      "parallel_issues": [
+        "50",
+        "52"
+      ]
+    }
+  ]
+}

@@ -11,6 +11,30 @@ Use the command shapes below exactly, then replace the example issue, PR, title,
 - Create the GitHub Project manually in this version and keep its required fields aligned with `docs/agents/board.md`: `Execution Stage`, `Execution Lane`, `Queue Class`, `Risk`, `Dependency`, `Conflict Surface`, `Feature Track`, and `Dispatch ID`.
 - Treat `pnpm ops github:init` as a bootstrap and drift report. Even with `-- --apply`, validated behavior is missing-label creation only; it does not create Projects, fields, or views.
 
+## Choose Your Entry Path
+
+Use the full planning path when you are starting from an idea or a new feature request:
+
+1. `pnpm ops init`
+2. `pnpm ops github:init`
+3. `pnpm ops prd`
+4. `pnpm ops issues`
+5. continue into handoff, export, schedule, claim, run, complete, review-prep, QA, and feedback
+
+Use the existing-live-issue path when the GitHub issue already exists and you are not creating a new PRD or issue decomposition:
+
+1. `pnpm ops init`
+2. `pnpm ops github:init`
+3. skip `prd` and `issues`
+4. create or refresh the handoff for the existing issue with `pnpm ops handoff -- --issue <issue-number> --title "Implement slice"`
+5. continue into export, schedule, claim, run, complete, review-prep, QA, and feedback
+
+Use the pre-PR late-stage path when the slice is implemented but no PR exists yet:
+
+- `review-prep` accepts `--issue` plus the required review-gate inputs. Add `--pr <pr-number>` only when a PR already exists.
+- `qa` accepts `--issue` by itself for strict targeted QA. Add `--pr <pr-number>` when you want the checklist to name the PR explicitly.
+- `feedback` accepts `--issue` plus `--finding`. Add `--pr <pr-number>` only when the finding should link back to an existing PR.
+
 ## Happy Path Order
 
 1. `pnpm ops init`
@@ -24,9 +48,9 @@ Use the command shapes below exactly, then replace the example issue, PR, title,
 9. `pnpm ops run -- --dispatch docs/agents/dispatches/<dispatch-id>.json --prepare-worktree`
 10. Implement the slice inside the prepared worktree and update the generated artifacts.
 11. `pnpm ops complete -- --issue <issue-number> --status "needs human review"`
-12. `pnpm ops review-prep -- --issue <issue-number> --pr <pr-number> ...required flags...`
-13. `pnpm ops qa -- --issue <issue-number> --pr <pr-number>`
-14. `pnpm ops feedback -- --issue <issue-number> --pr <pr-number> --finding "QA finding text"`
+12. `pnpm ops review-prep -- --issue <issue-number> ...required flags...`
+13. `pnpm ops qa -- --issue <issue-number>`
+14. `pnpm ops feedback -- --issue <issue-number> --finding "QA finding text"`
 
 The artifact chain across those steps is PRD -> issue decomposition -> handoff -> queue snapshot -> scheduler plan -> dispatch -> completion -> review prep -> QA -> feedback.
 
@@ -298,7 +322,7 @@ Common failure modes:
 Exact next command:
 
 ```bash
-pnpm ops review-prep -- --issue <issue-number> --pr <pr-number> --acceptance "<criterion 1>|<criterion 2>" --changed-areas "<path 1>|<path 2>" --dependency-changes "None" --local-refactors "None" --verification-commands "<cmd 1>|<cmd 2>" --verification-results "<observed result>" --gaps "<remaining gaps or None>" --risks "<risk 1>|<risk 2>" --follow-ups "<follow-up 1>|None"
+pnpm ops review-prep -- --issue <issue-number> --acceptance "<criterion 1>|<criterion 2>" --changed-areas "<path 1>|<path 2>" --dependency-changes "None" --local-refactors "None" --verification-commands "<cmd 1>|<cmd 2>" --verification-results "<observed result>" --gaps "<remaining gaps or None>" --risks "<risk 1>|<risk 2>" --follow-ups "<follow-up 1>|None"
 ```
 
 ## 11. Generate Review Prep
@@ -310,12 +334,13 @@ Prerequisites:
 Command:
 
 ```bash
-pnpm ops review-prep -- --issue <issue-number> --pr <pr-number> --acceptance "<criterion 1>|<criterion 2>" --changed-areas "<path 1>|<path 2>" --dependency-changes "None" --local-refactors "None" --verification-commands "<cmd 1>|<cmd 2>" --verification-results "<observed result>" --gaps "<remaining gaps or None>" --risks "<risk 1>|<risk 2>" --follow-ups "<follow-up 1>|None"
+pnpm ops review-prep -- --issue <issue-number> --acceptance "<criterion 1>|<criterion 2>" --changed-areas "<path 1>|<path 2>" --dependency-changes "None" --local-refactors "None" --verification-commands "<cmd 1>|<cmd 2>" --verification-results "<observed result>" --gaps "<remaining gaps or None>" --risks "<risk 1>|<risk 2>" --follow-ups "<follow-up 1>|None"
 ```
 
 Expected artifact or output:
 - Writes **Review Prep** under `docs/agents/reviews/`.
 - Example verified output in this repo: `docs/agents/reviews/2026-05-14-3-review-prep.md`
+- `--pr` is optional. Add it only when a PR already exists and you want the review artifact to carry that reference.
 
 Common failure modes:
 - Missing **Review Entry Gate** inputs produce explicit errors such as `Missing Review Entry input: acceptance criteria.`
@@ -324,7 +349,7 @@ Common failure modes:
 Exact next command:
 
 ```bash
-pnpm ops qa -- --issue <issue-number> --pr <pr-number>
+pnpm ops qa -- --issue <issue-number>
 ```
 
 ## 12. Run Targeted QA
@@ -348,11 +373,12 @@ Common failure modes:
 - Missing handoff or completion context is a workflow failure.
 - Missing review prep is a warning, not a hard blocker.
 - Broad change sets fail strict targeted QA even when all artifacts exist.
+- If a PR exists, pass `--pr <pr-number>` so the checklist names it. If no PR exists yet, running with `--issue` only is the intended pre-PR path.
 
 Exact next command:
 
 ```bash
-pnpm ops feedback -- --issue <issue-number> --pr <pr-number> --finding "QA finding text"
+pnpm ops feedback -- --issue <issue-number> --finding "QA finding text"
 ```
 
 ## 13. Classify QA Feedback
@@ -374,6 +400,7 @@ Expected artifact or output:
 Common failure modes:
 - `--apply` is not implemented; the command is local-first and does not create a GitHub issue or comment.
 - Vague findings create weak bug drafts. Write the finding as observable behavior, not as a fix idea.
+- `--pr` is optional. Use it when a PR exists and the follow-up should link back to that PR. Omit it on the intended pre-PR path.
 
 Exact next command:
 

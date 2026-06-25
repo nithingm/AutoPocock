@@ -15,6 +15,12 @@ This roadmap captures the operating-system direction decided during the initial 
 - `pnpm ops github:init` provides the first dry-run Tracker Bootstrap tracer bullet.
 - `.ai/ops.config.json` contains the canonical local GitHub Project schema under `projectSchema`.
 
+## Current Status Snapshot
+
+As of 2026-06-25, the manual operating system is accepted for pre-automation use in the current working tree. The current local implementation also includes a broader provider/DAG/Ralph orchestration layer, but that work is not yet cleanly landed on `origin/main` or reconciled with the GitHub Project board.
+
+Use `docs/agents/project-status.md` as the current operational read before deciding whether to continue implementation, review local changes, or reconcile tracker state. Use `docs/agents/knowledge-map.md` to orient across domain language, command contracts, Workflow Artifacts, live tracker state, and remaining work.
+
 ## Board Model
 
 Execution stages:
