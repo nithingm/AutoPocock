@@ -5,6 +5,8 @@ Repo state: `D:\Projects\AutoPocock`
 Validator: Codex
 Issue under reconciliation: `#15` `Audit reconciliation pass`
 
+Update note, 2026-06-25: this reconciliation is a historical snapshot. The follow-up gaps it lists were later closed in the current working tree; the current gate record is `docs/agents/manual-acceptance-checklist.md`.
+
 ## Observable Outcome
 
 Produce a reconciliation artifact that compares the real-run happy-path audit from issue `#4` against the shipped hardening work from issues `#5` through `#10`, issue `#14`, and the approved issue `#13` decision where relevant, so the final acceptance checklist can distinguish eliminated operator guesswork from unresolved follow-up work.
@@ -105,7 +107,7 @@ Audit findings from issue `#4`:
 Shipped hardening:
 
 - `manual-walkthrough.md`, `workflow.md`, and `README.md` now document the canonical artifact chain, review gate, strict QA contract, local-first feedback, and the approved issue `#13` split
-- scheduler docs now say manual `pnpm ops dispatch` exists and is still rough
+- scheduler docs then said manual `pnpm ops dispatch` existed and was rough; this manual-dispatch gap is superseded by the 2026-06-25 acceptance evidence
 - workflow docs now call out that GitHub project creation/field setup remains manual in this phase
 - scheduler output now distinguishes missing repo canonical label from missing issue label
 
@@ -159,16 +161,16 @@ These audit rough edges are credibly closed by shipped work:
 - Whether issue `#13` changes the repo shape for TDD, skills, and prompts
 - Whether scheduler skips due to missing `ready-for-agent` come from repo config drift or issue label drift
 
-## Remaining Unresolved Follow-Up Work
+## Historical Remaining Follow-Up Work
 
-These operator-guesswork gaps still exist and should stay explicit:
+These were the operator-guesswork gaps at the time of this 2026-05-14 reconciliation. The manual OS blocking items in this list were later closed in the current working tree and are tracked by `docs/agents/manual-acceptance-checklist.md`.
 
 - `scripts/qa.mjs` still resolves targeted artifacts with substring matching, so the exact issue `4` versus `123` mis-link class from the audit is not fully removed
 - `docs/agents/manual-walkthrough.md` still lacks an explicit branch for validating or operating against an already-existing live issue instead of starting from `prd` and `issues`
 - the docs still do not define a clear stop/recovery decision when queue export and scheduling select a different issue than the one under active ownership
 - late-stage walkthrough guidance still assumes a PR exists; pre-PR usage rules for `review-prep`, `qa`, and `feedback` remain implicit
 - `github:export` still does not report issue-level exclusion when an otherwise valid issue is simply not attached to the configured project
-- manual `pnpm ops dispatch` remains rough: handoff auto-resolution is still substring-based and a missing matching handoff does not block artifact creation
+- superseded by current working tree: manual `pnpm ops dispatch` handoff auto-resolution was substring-based and a missing matching handoff did not block artifact creation
 - `handoff` and `hitl` still rely on operator judgment to replace placeholders, with no comparable validation gate to the hardened completion/review-prep path
 - `mirror -- --apply` remains unvalidated in the real-repo notes reviewed here
 - the PRD called for a manual acceptance checklist, but no dedicated final checklist artifact is present in the compared sources yet
@@ -181,7 +183,7 @@ This reconciliation is specific enough to support the final acceptance checklist
 - fixes that are only documented guidance
 - rough edges that remain as explicit follow-up work
 
-A final acceptance checklist should treat these as required unresolved items unless a later slice closes them:
+A final acceptance checklist at that time needed to treat these as required unresolved items unless a later slice closed them. The later acceptance artifact is now present at `docs/agents/manual-acceptance-checklist.md`:
 
 - exact targeted-QA artifact matching
 - existing-live-issue walkthrough branch

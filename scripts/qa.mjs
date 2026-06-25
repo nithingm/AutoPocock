@@ -20,9 +20,50 @@ function hasFlag(args, name) {
   return args.includes(`--${name}`);
 }
 
+function normalizeIssue(issue) {
+  const match = `${issue || ""}`.match(/\d+/);
+  return match ? match[0] : "";
+}
+
+function dropLeadingDateTokens(tokens) {
+  if (tokens.length >= 3 && /^\d{4}$/.test(tokens[0]) && /^\d{1,2}$/.test(tokens[1]) && /^\d{1,2}$/.test(tokens[2])) {
+    return tokens.slice(3);
+  }
+  return tokens;
+}
+
+function fileNameMatchesIssue(fileName, issue) {
+  const stem = path.basename(fileName, path.extname(fileName)).toLowerCase();
+  const tokens = dropLeadingDateTokens(stem.split(/[^a-z0-9]+/i).filter(Boolean));
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    if ((tokens[index] === "issue" || tokens[index] === "pr") && tokens[index + 1] === issue) {
+      return true;
+    }
+  }
+
+  return tokens.includes(issue);
+}
+
+function contentMatchesIssue(content, issue) {
+  if (!content) {
+    return false;
+  }
+
+  const escapedIssue = issue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const explicitPatterns = [
+    new RegExp(`\\bTracker\\s*:\\s*#?${escapedIssue}\\b`, "i"),
+    new RegExp(`\\bIssue\\s*:\\s*#?${escapedIssue}\\b`, "i"),
+    new RegExp(`\\bPR\\s*:\\s*#?${escapedIssue}\\b`, "i"),
+  ];
+
+  return explicitPatterns.some((pattern) => pattern.test(content));
+}
+
 async function findMatchingArtifact(dir, issue) {
   const targetDir = path.join(cwd, dir);
   let files = [];
+  const normalizedIssue = normalizeIssue(issue);
 
   try {
     files = await readdir(targetDir);
@@ -30,11 +71,39 @@ async function findMatchingArtifact(dir, issue) {
     return null;
   }
 
-  const match = files
-    .filter((file) => file.endsWith(".md"))
-    .find((file) => file.includes(issue));
+  if (!normalizedIssue) {
+    return null;
+  }
 
-  return match ? path.join(targetDir, match) : null;
+  const candidates = await Promise.all(
+    files
+      .filter((file) => file.endsWith(".md"))
+      .map(async (file) => {
+        const fullPath = path.join(targetDir, file);
+        let content = "";
+
+        try {
+          content = await readFile(fullPath, "utf8");
+        } catch {
+          content = "";
+        }
+
+        return {
+          file,
+          fullPath,
+          contentMatch: contentMatchesIssue(content, normalizedIssue),
+          fileMatch: fileNameMatchesIssue(file, normalizedIssue),
+        };
+      }),
+  );
+
+  const matches = candidates
+    .filter((candidate) => candidate.contentMatch || candidate.fileMatch)
+    .sort((left, right) => right.file.localeCompare(left.file));
+
+  const match = matches[0];
+
+  return match ? match.fullPath : null;
 }
 
 async function loadArtifact(filePath) {

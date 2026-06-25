@@ -1,5 +1,7 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { ensureApprovedContext, parseContextArtifact } from "./lib/context-plane.mjs";
+import { renderPrdFromContext } from "./lib/prd-plane.mjs";
 
 const cwd = process.cwd();
 
@@ -15,6 +17,7 @@ function slugify(value) {
 function getArgs() {
   const raw = process.argv.slice(2);
   const titleParts = [];
+  let contextPath = "";
 
   for (let index = 0; index < raw.length; index += 1) {
     const token = raw[index];
@@ -29,69 +32,58 @@ function getArgs() {
       }
       continue;
     }
+    if (token === "--context" || token === "-c") {
+      contextPath = raw[index + 1] || "";
+      index += 1;
+      continue;
+    }
     titleParts.push(token);
   }
 
-  const title = titleParts.join(" ").trim() || "Untitled Feature";
-  return { title };
+  const title = titleParts.join(" ").trim();
+  return { title, contextPath };
 }
 
-function renderPrd(title) {
-  return `# ${title}
+async function resolveContextPath(source) {
+  if (source) {
+    return path.isAbsolute(source) ? source : path.join(cwd, source);
+  }
 
-## Problem
+  const contextDir = path.join(cwd, "docs", "agents", "contexts");
+  const files = (await readdir(contextDir))
+    .filter((file) => file.endsWith(".md") && file !== ".gitkeep")
+    .sort()
+    .reverse();
 
-- What problem are we solving?
-- Who is affected?
-- Why does it matter now?
+  if (files.length === 0) {
+    throw new Error("No context artifact found. Run `pnpm ops context -- --title \"Feature Name\"` first or pass --context.");
+  }
 
-## User Value
-
-- What changes for the user when this ships?
-- What outcome should be noticeably better?
-
-## Scope
-
-- In scope:
-- Out of scope:
-
-## Acceptance Criteria
-
-- [ ] Define the primary happy path.
-- [ ] Define at least one failure path or edge case.
-- [ ] Define what evidence is required for QA sign-off.
-
-## Constraints
-
-- Technical constraints:
-- Product constraints:
-- Operational constraints:
-
-## Risks
-
-- Risk:
-- Mitigation:
-
-## Open Questions
-
-- Question:
-
-## Notes For Issue Decomposition
-
-- What can be split into independent vertical slices?
-- What should explicitly not be bundled together?
-`;
+  return path.join(contextDir, files[0]);
 }
 
 async function main() {
-  const { title } = getArgs();
+  const { title, contextPath: requestedContextPath } = getArgs();
+  const contextPath = await resolveContextPath(requestedContextPath);
+  const contextMarkdown = await readFile(contextPath, "utf8");
+  const context = ensureApprovedContext(contextMarkdown, contextPath);
+  const parsed = parseContextArtifact(contextMarkdown);
+  const effectiveTitle = title || parsed.title || "Untitled Feature";
   const date = new Date().toISOString().slice(0, 10);
-  const slug = slugify(title) || "untitled-feature";
+  const slug = slugify(effectiveTitle) || "untitled-feature";
   const dir = path.join(cwd, "docs", "PRDs");
   const target = path.join(dir, `${date}-${slug}.md`);
 
   await mkdir(dir, { recursive: true });
-  await writeFile(target, renderPrd(title), "utf8");
+  await writeFile(
+    target,
+    renderPrdFromContext({
+      title: effectiveTitle,
+      contextPath,
+      context,
+    }),
+    "utf8",
+  );
 
   process.stdout.write(`${target}\n`);
 }

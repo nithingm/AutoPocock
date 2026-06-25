@@ -90,3 +90,41 @@ test("manual targeted QA stays permissive and records warnings in the generated 
   assert.match(checklist, /Manual mode bypassed strict issue identifier validation\./);
   assert.match(checklist, /Missing required Handoff Artifact/);
 });
+
+test("strict targeted QA does not match unrelated artifacts by loose substring", async () => {
+  const cwd = await makeWorkspace();
+  await writeFile(
+    path.join(cwd, "docs", "agents", "handoffs", "2026-05-14-123-foreign.md"),
+    `# Context Handoff
+
+## Issue
+
+- Tracker: #123
+`,
+  );
+  await writeFile(
+    path.join(cwd, "docs", "agents", "completions", "2026-05-14-123-foreign.md"),
+    `# Completion Report
+
+## Issue
+
+- Tracker: #123
+`,
+  );
+  await writeFile(
+    path.join(cwd, "docs", "agents", "reviews", "2026-05-14-123-foreign.md"),
+    `# Review Prep
+`,
+  );
+
+  const result = await runQa(cwd, ["--issue", "4", "--pr", "40"]);
+  const checklist = await readFile(result.stdout.trim(), "utf8");
+
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /Missing required Handoff Artifact/);
+  assert.match(result.stderr, /Missing required Completion Report/);
+  assert.doesNotMatch(checklist, /123-foreign/);
+  assert.match(checklist, /- Handoff: missing/);
+  assert.match(checklist, /- Completion report: missing/);
+  assert.match(checklist, /### Found Artifacts\r?\n\r?\n- None/);
+});

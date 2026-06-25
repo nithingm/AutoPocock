@@ -9,309 +9,202 @@ Source PRD: 2026-05-14-github-backed-operational-workflow.md
 - Split by vertical slice, not by technical layer when possible.
 - Create follow-up bugs instead of silently expanding scope.
 
-## Issue 1: Add dry-run `github:init` tracer bullet
+## Issue 1: Deliver acceptance criterion 1: `github:init` has a documented dry-run-first contract using the `gh` CLI.
 
 ### Outcome
 
-- The Solo Operator can run `pnpm ops github:init` and receive a useful dry-run report about GitHub readiness without mutating GitHub.
-
-### Queue
-
-- Type: AFK
-- Queue class: tracer-bullet
-- Risk: low
-- Conflict surface: low
-- Blocked by: None - can start immediately
-- User stories covered: GitHub bootstrap, dry-run safety, `gh` CLI integration
+- Describe the user-visible or system-visible outcome.
 
 ### Scope
 
-- Included: `gh` presence detection, authentication detection, label/schema report, project field/view report, local issue template verification.
-- Excluded: label creation, project creation, project mutation, issue creation.
+- Included:
+- Excluded:
 
 ### Implementation Notes
 
-- Key files or modules: `scripts/ops.mjs`, `.ai/ops.config.json`, `docs/agents/issue-tracker.md`, `docs/agents/board.md`, `ROADMAP.md`.
-- Use `gh` CLI first. Do not handle GitHub tokens inside the repo.
-- Dry-run is default.
+- Key files or modules:
+- Risks or dependencies:
 
 ### Verification
 
-- Automated: `node --check scripts/ops.mjs`.
-- Manual: run `pnpm ops github:init` and verify it reports missing `gh` or current `gh` readiness without mutating anything.
+- Automated:
+- Manual:
 
 ### Non-Goals
 
-- Do not create GitHub Projects.
-- Do not create labels.
-- Do not export queue data.
+- Explicitly state what this issue will not do.
 
-## Issue 2: Add `github:init --apply` label bootstrap
+## Issue 2: Deliver acceptance criterion 2: GitHub Project field schema is recorded in docs and config.
 
 ### Outcome
 
-- The Solo Operator can run `pnpm ops github:init -- --apply` to create missing canonical labels while reporting drift and leaving existing labels untouched.
-
-### Status
-
-- Implemented: `github:init -- --apply` creates only missing canonical labels after `gh` availability, authentication, and label inspection succeed; drift remains report-only.
-
-### Queue
-
-- Type: AFK
-- Queue class: routine-afk
-- Risk: medium
-- Conflict surface: low
-- Blocked by: Issue 1
-- User stories covered: label bootstrap, tracker drift safety
+- Describe the user-visible or system-visible outcome.
 
 ### Scope
 
-- Included: create missing labels through `gh label create`, report existing labels, report drift.
-- Excluded: renaming labels, deleting labels, changing existing label colors/descriptions, Project mutation.
+- Included:
+- Excluded:
 
 ### Implementation Notes
 
-- Key files or modules: `scripts/ops.mjs`, `docs/agents/triage-labels.md`, `docs/agents/issue-tracker.md`.
-- Existing-object mismatch is Tracker Drift, not automatic cleanup.
+- Key files or modules:
+- Risks or dependencies:
 
 ### Verification
 
-- Automated: `node --check scripts/ops.mjs`.
-- Automated: coverage exists for dry-run planning, apply-only missing-label creation, drift reporting, and keeping project fields/views report-only.
-- Manual: dry-run should show planned creates; `--apply` should require authenticated `gh` access before creating missing labels.
+- Automated:
+- Manual:
 
 ### Non-Goals
 
-- Do not mutate Project fields.
-- Do not handle tokens.
+- Explicitly state what this issue will not do.
 
-## Issue 3: Lock GitHub Project schema in docs and config
+## Issue 3: Deliver acceptance criterion 3: Queue export rules are documented for all non-`Done` project issues.
 
 ### Outcome
 
-- The required GitHub Project field schema is documented and represented in config so bootstrap/export/scheduler share one contract.
-
-### Queue
-
-- Type: AFK
-- Queue class: routine-afk
-- Risk: low
-- Conflict surface: low
-- Blocked by: Issue 1
-- User stories covered: board schema, scheduler contract
+- Describe the user-visible or system-visible outcome.
 
 ### Scope
 
-- Included: required fields, allowed values, optional fields, config representation.
-- Excluded: creating fields through GitHub APIs.
+- Included:
+- Excluded:
 
 ### Implementation Notes
 
-- Required fields: `Execution Stage`, `Execution Lane`, `Queue Class`, `Risk`, `Dependency`, `Conflict Surface`, `Feature Track`, `Dispatch ID`.
-- Key files or modules: `.ai/ops.config.json`, `docs/agents/board.md`, `docs/agents/issue-tracker.md`, `ROADMAP.md`.
+- Key files or modules:
+- Risks or dependencies:
 
 ### Verification
 
-- Automated: JSON config remains valid.
-- Manual: compare docs and config for matching field names and values.
+- Automated:
+- Manual:
 
 ### Non-Goals
 
-- Do not implement GitHub Project creation.
+- Explicitly state what this issue will not do.
 
-## Issue 4: Add `github:export` queue snapshot
+## Issue 4: Deliver acceptance criterion 4: Artifact mirroring rules are documented for handoffs, HITL steps, completion reports, review prep, QA summaries, feedback, and memory proposals.
 
 ### Outcome
 
-- The Solo Operator can export GitHub Project issues into `.ai/queue.json` as a scheduler snapshot.
-
-### Queue
-
-- Type: AFK
-- Queue class: routine-afk
-- Risk: medium
-- Conflict surface: medium
-- Blocked by: Issue 3
-- User stories covered: queue export, scheduler input
+- Describe the user-visible or system-visible outcome.
 
 ### Scope
 
-- Included: export all non-`Done` project issues, normalize fields into queue schema, write `.ai/queue.json`.
-- Excluded: scheduler dispatch, GitHub mutation, custom API client.
+- Included:
+- Excluded:
 
 ### Implementation Notes
 
-- Key files or modules: `scripts/ops.mjs`, `.ai/ops.config.json`, `.ai/queue.example.json`, `docs/agents/board.md`.
-- Prefer `gh` CLI output. If project fields are unavailable, report missing config or unsupported export path.
+- Key files or modules:
+- Risks or dependencies:
 
 ### Verification
 
-- Automated: `node --check scripts/ops.mjs`.
-- Manual: export against a configured project or verify missing project config error is clear.
+- Automated:
+- Manual:
 
 ### Non-Goals
 
-- Do not infer missing project fields.
-- Do not export only `ready-for-agent`; export all non-`Done` items.
+- Explicitly state what this issue will not do.
 
-## Issue 5: Define and stub artifact mirroring
+## Issue 5: Deliver acceptance criterion 5: `feedback` behavior is specified for Same-PR Fix proposals and new bug issues.
 
 ### Outcome
 
-- The workflow clearly defines which local artifacts are mirrored to GitHub comments and exposes a dry-run mirroring stub.
-
-### Status
-
-- Implemented beyond the initial stub: `pnpm ops mirror` supports dry-run summaries now, and live comment posting exists only behind explicit `--apply` with authenticated `gh` access.
-
-### Queue
-
-- Type: AFK
-- Queue class: routine-afk
-- Risk: medium
-- Conflict surface: low
-- Blocked by: Issue 1
-- User stories covered: GitHub comment visibility, auditability
+- Describe the user-visible or system-visible outcome.
 
 ### Scope
 
-- Included: docs for mirroring handoff, HITL steps, completion reports, review prep, targeted QA summaries, feedback, memory proposal summaries.
-- Included: `pnpm ops mirror -- --artifact <path> --issue 123 --dry-run`.
-- Excluded: posting comments by default; comment posting requires explicit `--apply`.
+- Included:
+- Excluded:
 
 ### Implementation Notes
 
-- Key files or modules: `scripts/ops.mjs`, `docs/agents/issue-tracker.md`, `docs/agents/handoff.md`.
-- Full Scheduler Plans are not mirrored by default; only summaries after `--apply` or `--dispatch`.
+- Key files or modules:
+- Risks or dependencies:
 
 ### Verification
 
-- Automated: `node --check scripts/ops.mjs`.
-- Automated: coverage exists for supported artifact summaries, scheduler-plan rejection, and dry-run output that includes target and comment body summary.
-- Manual: dry-run should print the target issue or PR and summary without posting; `--apply` should require authenticated `gh` access.
+- Automated:
+- Manual:
 
 ### Non-Goals
 
-- Do not post GitHub comments by default.
+- Explicitly state what this issue will not do.
 
-## Issue 6: Add `feedback` dry-run classifier
+## Issue 6: Deliver acceptance criterion 6: `memory-propose` behavior is specified for context, ADR, workflow, and roadmap proposals.
 
 ### Outcome
 
-- QA findings can be classified into Same-PR Fix proposals or new bug issue drafts without silently expanding scope.
-
-### Status
-
-- Implemented: dry-run classification is in place, local JSON and markdown feedback artifacts are written under `docs/agents/feedback/`, and GitHub mutation remains disabled.
-
-### Queue
-
-- Type: AFK
-- Queue class: routine-afk
-- Risk: medium
-- Conflict surface: low
-- Blocked by: Issue 5
-- User stories covered: QA feedback loop, bug loop discipline
+- Describe the user-visible or system-visible outcome.
 
 ### Scope
 
-- Included: `pnpm ops feedback -- --issue 123 --pr 456 --finding "...";` dry-run output and local artifact creation.
-- Included: Same-PR Fix proposal template and bug issue draft template.
-- Excluded: GitHub issue/comment creation by default.
+- Included:
+- Excluded:
 
 ### Implementation Notes
 
-- Key files or modules: `scripts/ops.mjs`, `docs/agents/handoff.md`, `docs/agents/workflow.md`.
-- Same-PR Fix approval remains with the Solo Operator.
+- Key files or modules:
+- Risks or dependencies:
 
 ### Verification
 
-- Automated: `node --check scripts/ops.mjs`.
-- Automated: coverage exists for dry-run classification output, Same-PR approval signaling, local artifact suggestions/writes, and no-mutation behavior.
-- Manual: run the feedback command and inspect the dry-run classification output plus written local artifacts.
+- Automated:
+- Manual:
 
 ### Non-Goals
 
-- Do not auto-approve Same-PR Fixes.
-- Do not create live GitHub issues without `--apply`.
+- Explicitly state what this issue will not do.
 
-## Issue 7: Add `memory-propose` workflow
+## Issue 7: Deliver acceptance criterion 7: `run` stub behavior is specified for claimed dispatch validation without provider execution.
 
 ### Outcome
 
-- Subagents and Solo Operators can propose Durable Memory changes without applying them directly.
-
-### Status
-
-- Implemented: `pnpm ops memory-propose` writes proposal artifacts in JSON and markdown form under `docs/agents/memory-proposals/` without editing durable-memory targets directly.
-
-### Queue
-
-- Type: AFK
-- Queue class: routine-afk
-- Risk: low
-- Conflict surface: low
-- Blocked by: None - can start immediately
-- User stories covered: memory safety, domain documentation
+- Describe the user-visible or system-visible outcome.
 
 ### Scope
 
-- Included: proposal artifact directory, command stub, proposal types `context`, `adr`, `workflow`, `roadmap`.
-- Excluded: automatic edits to `CONTEXT.md`, ADRs, workflow docs, or roadmap.
+- Included:
+- Excluded:
 
 ### Implementation Notes
 
-- Key files or modules: `scripts/ops.mjs`, `docs/agents/domain.md`, `docs/agents/workflow.md`, `docs/agents/memory-proposals/`.
-- Proposals include rationale, target files, suggested text, and risk of accepting/rejecting.
+- Key files or modules:
+- Risks or dependencies:
 
 ### Verification
 
-- Automated: `node --check scripts/ops.mjs`.
-- Automated: coverage exists for proposal artifact generation, stored target files, and rendered markdown content.
-- Manual: generate a proposal and inspect the written JSON and markdown artifacts.
+- Automated:
+- Manual:
 
 ### Non-Goals
 
-- Do not implement `--apply` for memory.
+- Explicitly state what this issue will not do.
 
-## Issue 8: Add `run` no-op runner stub
+## Issue 8: Deliver acceptance criterion 8: The work is decomposed into tracer-bullet slices with HITL/AFK queue classes.
 
 ### Outcome
 
-- A future runner has a minimal command contract for reading claimed dispatch artifacts and validating isolation requirements without invoking a provider.
-
-### Status
-
-- Implemented: `pnpm ops run -- --dispatch <path>` validates claimed dispatch state, required claim metadata, `forbidden_actions`, and prints a no-op runner plan without invoking any provider.
-
-### Queue
-
-- Type: AFK
-- Queue class: routine-afk
-- Risk: low
-- Conflict surface: low
-- Blocked by: Issue 1
-- User stories covered: runner contract, dispatch lifecycle
+- Describe the user-visible or system-visible outcome.
 
 ### Scope
 
-- Included: `pnpm ops run -- --dispatch <path>` validates `status = claimed`, claim metadata, isolation mode, forbidden actions, and prints what would run.
-- Excluded: creating worktrees, running Codex/Claude, writing code, Docker.
+- Included:
+- Excluded:
 
 ### Implementation Notes
 
-- Key files or modules: `scripts/ops.mjs`, `docs/agents/board.md`, `docs/agents/workflow.md`, `ROADMAP.md`.
-- Runner must not choose work itself.
+- Key files or modules:
+- Risks or dependencies:
 
 ### Verification
 
-- Automated: `node --check scripts/ops.mjs`.
-- Automated: coverage exists for rejecting non-claimed dispatches and for the no-op runner-plan output on claimed artifacts.
-- Manual: run against a claimed dispatch artifact and verify the command only prints the runner plan and no provider call happens.
+- Automated:
+- Manual:
 
 ### Non-Goals
 
-- Do not execute agents.
-- Do not merge.
-- Do not update Durable Memory.
+- Explicitly state what this issue will not do.

@@ -83,12 +83,26 @@ test("manual smoke test chains canonical artifacts locally with a GitHub export 
   assert.equal(init.code, 0);
   assert.match(init.stdout, /Workflow structure is initialized/);
 
+  const context = await run(["context", "--title", "Canonical Manual Smoke"]);
+  assert.equal(context.code, 0);
+  const contextPath = context.stdout.trim();
+
+  const contextApprove = await run(["context-approve", "--context", contextPath, "--approved-by", "solo-operator"]);
+  assert.equal(contextApprove.code, 0);
+
   const prd = await run(["prd", "--title", "Canonical Manual Smoke"]);
   assert.equal(prd.code, 0);
   const prdPath = prd.stdout.trim();
   await writeFile(
     prdPath,
     `# Canonical Manual Smoke
+
+## Approval
+
+- Status: approved
+- Approved by: solo-operator
+- Source context: ${contextPath}
+- Source context status: approved
 
 ## Problem
 
@@ -113,11 +127,14 @@ test("manual smoke test chains canonical artifacts locally with a GitHub export 
     "utf8",
   );
 
+  const prdApprove = await run(["prd-approve", "--prd", prdPath, "--approved-by", "solo-operator"]);
+  assert.equal(prdApprove.code, 0);
+
   const issues = await run(["issues", "--prd", prdPath]);
   assert.equal(issues.code, 0);
   const issuesPath = issues.stdout.trim();
   const issuesMarkdown = await readFile(issuesPath, "utf8");
-  assert.match(issuesMarkdown, /Deliver acceptance criterion 1: Chain generated manual artifacts together from PRD through feedback\./);
+  assert.match(issuesMarkdown, /Implementation 1: Chain generated manual artifacts together from PRD through feedback\./);
   assert.match(issuesMarkdown, /Source PRD: \d{4}-\d{2}-\d{2}-canonical-manual-smoke\.md/);
 
   const handoff = await run(["handoff", "--issue", "17", "--title", "Canonical manual smoke slice"]);
@@ -327,7 +344,10 @@ test("manual smoke test chains canonical artifacts locally with a GitHub export 
 
   assert.deepEqual(commandsRun, [
     `node ${opsScript} init`,
+    `node ${opsScript} context --title Canonical Manual Smoke`,
+    `node ${opsScript} context-approve --context ${contextPath} --approved-by solo-operator`,
     `node ${opsScript} prd --title Canonical Manual Smoke`,
+    `node ${opsScript} prd-approve --prd ${prdPath} --approved-by solo-operator`,
     `node ${opsScript} issues --prd ${prdPath}`,
     `node ${opsScript} handoff --issue 17 --title Canonical manual smoke slice`,
     `node ${opsScript} github:export --input ${exportFixturePath} --output .ai/queue.json`,

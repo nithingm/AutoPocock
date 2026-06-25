@@ -3,11 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@10.13.1",
   "scripts": {
     "ops": "node ./scripts/ops.mjs",
     "prd": "node ./scripts/prd.mjs",
     "issues": "node ./scripts/issues.mjs",
     "qa": "node ./scripts/qa.mjs",
+    "smoke:console": "node ./scripts/smoke-console.mjs",
+    "verify:project": "node ./scripts/verify-project.mjs",
     "test": "node --test"
   }
 }
