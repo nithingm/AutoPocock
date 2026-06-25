@@ -123,6 +123,7 @@ Usage:
   pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --prepare-docker
   pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --execute --execute-docker
   pnpm ops docker:validate -- --image node:22-bookworm --provider codex --require-command node,pnpm,git --docker-env CODEX_HOME
+  pnpm ops docker:clean -- --max-age-hours 24
   pnpm ops dispatch -- --issue 123 --title "Docker slice" --source manual --override-reason "Solo Operator approved" --isolation-mode docker --docker-env CODEX_HOME --docker-volume codex-cache:/codex-cache
   pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --execute
   pnpm ops console -- --port 4173 --host 127.0.0.1
@@ -246,6 +247,14 @@ function dockerRunPlanForDispatch(artifact, { provider = "codex", liveProvider =
     "-t",
     "--name",
     docker.container_name,
+    "--label",
+    "autopocock.managed=true",
+    "--label",
+    `autopocock.dispatch_id=${dockerLabelValue(artifact.dispatch_id || "")}`,
+    "--label",
+    `autopocock.issue_id=${dockerLabelValue(artifact.issue_id || "")}`,
+    "--label",
+    "autopocock.cleanup=container",
     "--network",
     docker.network,
     ...((docker.env || []).flatMap((name) => ["-e", name])),
@@ -280,6 +289,10 @@ function dockerRunPlanForDispatch(artifact, { provider = "codex", liveProvider =
     args,
     rendered_command: ["docker", ...args].join(" "),
   };
+}
+
+function dockerLabelValue(value) {
+  return String(value || "").replace(/[^A-Za-z0-9_.:-]/g, "-").slice(0, 128);
 }
 
 function uniqueList(values = []) {
@@ -3396,6 +3409,127 @@ async function dockerValidate(args) {
   process.stdout.write(`${lines.join("\n")}\n`);
 }
 
+function parseDockerInspectOutput(stdout) {
+  const text = String(stdout || "").trim();
+  if (!text) {
+    return [];
+  }
+
+  const parsed = JSON.parse(text);
+  return Array.isArray(parsed) ? parsed : [parsed];
+}
+
+async function planDockerCleanup({ dockerCommand = "docker", maxAgeHours = 24 } = {}) {
+  const listed = await runCommand(dockerCommand, [
+    "container",
+    "ls",
+    "-a",
+    "--filter",
+    "label=autopocock.managed=true",
+    "--format",
+    "{{.ID}}",
+  ]);
+  const ids = String(listed.stdout || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (ids.length === 0) {
+    return {
+      maxAgeHours,
+      entries: [],
+    };
+  }
+
+  const inspected = await runCommand(dockerCommand, ["container", "inspect", ...ids]);
+  const now = Date.now();
+  const entries = parseDockerInspectOutput(inspected.stdout).map((container) => {
+    const labels = container?.Config?.Labels || {};
+    const createdAtMs = Date.parse(container?.Created || "");
+    const ageHours = Number.isFinite(createdAtMs) ? (now - createdAtMs) / (1000 * 60 * 60) : null;
+    const status = String(container?.State?.Status || "").toLowerCase();
+    const managed = labels["autopocock.managed"] === "true";
+    const cleanupPolicy = labels["autopocock.cleanup"] || "";
+    const stopped = ["created", "dead", "exited"].includes(status);
+    const oldEnough = ageHours != null && ageHours >= maxAgeHours;
+    const eligible = managed && cleanupPolicy === "container" && stopped && oldEnough;
+    return {
+      id: container?.Id || "",
+      shortId: String(container?.Id || "").slice(0, 12),
+      name: String(container?.Name || "").replace(/^\//, ""),
+      status,
+      created: container?.Created || "",
+      ageHours,
+      dispatchId: labels["autopocock.dispatch_id"] || "",
+      issueId: labels["autopocock.issue_id"] || "",
+      action: eligible ? "delete" : managed ? "keep" : "ignore",
+      reason: eligible
+        ? "stopped managed container exceeded retention"
+        : !managed
+        ? "not managed by AutoPocock"
+        : cleanupPolicy !== "container"
+        ? `cleanup policy is ${cleanupPolicy || "unset"}`
+        : !stopped
+        ? `container status is ${status || "unknown"}`
+        : ageHours == null
+        ? "created timestamp is unavailable"
+        : "container is inside retention window",
+    };
+  });
+
+  return {
+    maxAgeHours,
+    entries,
+  };
+}
+
+async function dockerClean(args) {
+  const apply = args.includes("--apply");
+  const maxAgeValue = Number.parseFloat(readOption(args, "max-age-hours", "24"));
+  const maxAgeHours = Number.isFinite(maxAgeValue) && maxAgeValue >= 0 ? maxAgeValue : 24;
+  const dockerReadiness = await commandAvailable("docker");
+  if (!dockerReadiness.available) {
+    throw new Error(`docker:clean requires Docker CLI. ${dockerReadiness.stderr || "Docker was not found."}`);
+  }
+
+  const plan = await planDockerCleanup({ dockerCommand: dockerReadiness.command || "docker", maxAgeHours });
+  const deleteEntries = plan.entries.filter((entry) => entry.action === "delete");
+
+  if (apply && deleteEntries.length > 0) {
+    await runCommand(dockerReadiness.command || "docker", ["container", "rm", ...deleteEntries.map((entry) => entry.id)]);
+  }
+
+  const lines = [
+    "# Docker Cleanup",
+    "",
+    `Mode: ${apply ? "apply" : "dry-run"}`,
+    `Retention: stopped AutoPocock-managed containers at least ${maxAgeHours} hours old`,
+    `Deleted: ${apply ? deleteEntries.length : 0}`,
+    "",
+    "Policy:",
+    "- Only containers with `autopocock.managed=true` are considered.",
+    "- Running containers are never removed by this command.",
+    "- User-declared Docker volumes are never removed by this command.",
+    "- Deletion requires `--apply`.",
+    "",
+    "Entries:",
+  ];
+
+  if (plan.entries.length === 0) {
+    lines.push("- None");
+  } else {
+    for (const entry of plan.entries) {
+      lines.push(
+        `- ${entry.action}: ${entry.name || entry.shortId} (${entry.status || "unknown"}; ${
+          entry.ageHours == null ? "age unknown" : `${entry.ageHours.toFixed(2)}h old`
+        }; dispatch ${entry.dispatchId || "unknown"}; ${entry.reason})`,
+      );
+    }
+  }
+
+  process.stdout.write(`${lines.join("\n")}\n`);
+}
+
 function normalizeAbsolutePath(targetPath) {
   return path.resolve(path.isAbsolute(targetPath) ? targetPath : path.join(cwd, targetPath));
 }
@@ -4510,6 +4644,11 @@ async function main() {
 
   if (command === "docker:validate") {
     await dockerValidate(args);
+    return;
+  }
+
+  if (command === "docker:clean") {
+    await dockerClean(args);
     return;
   }
 

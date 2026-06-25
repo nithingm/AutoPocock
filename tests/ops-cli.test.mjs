@@ -87,6 +87,9 @@ async function installFakeDocker(cwd) {
     `#!/usr/bin/env sh
 if [ "$1" = "--version" ]; then echo "Docker version 99.0.0"; exit 0; fi
 printf '%s\\n' "$*" >> "$DOCKER_LOG"
+if [ "$1" = "container" ] && [ "$2" = "ls" ]; then printf '%s\\n' "$DOCKER_CONTAINER_LS_OUTPUT"; exit 0; fi
+if [ "$1" = "container" ] && [ "$2" = "inspect" ]; then printf '%s\\n' "$DOCKER_INSPECT_OUTPUT"; exit 0; fi
+if [ "$1" = "container" ] && [ "$2" = "rm" ]; then shift 2; printf 'removed %s\\n' "$*"; exit 0; fi
 if [ "$DOCKER_FAIL" = "1" ]; then echo "missing command" >&2; exit 1; fi
 echo "docker container ran"
 exit 0
@@ -101,6 +104,20 @@ if "%1"=="--version" (
   exit /b 0
 )
 echo %*>>"%DOCKER_LOG%"
+if "%1"=="container" if "%2"=="ls" (
+  echo %DOCKER_CONTAINER_LS_OUTPUT%
+  exit /b 0
+)
+if "%1"=="container" if "%2"=="inspect" (
+  echo %DOCKER_INSPECT_OUTPUT%
+  exit /b 0
+)
+if "%1"=="container" if "%2"=="rm" (
+  shift
+  shift
+  echo removed %*
+  exit /b 0
+)
 if "%DOCKER_FAIL%"=="1" (
   echo missing command 1>&2
   exit /b 1
@@ -972,6 +989,8 @@ test("run --prepare-docker prints a Docker isolation plan without invoking a pro
   assert.match(result.stdout, /Docker extra volumes: codex-cache:\/codex-cache/);
   assert.match(result.stdout, /Docker available: (yes|no)/);
   assert.match(result.stdout, /Docker command: docker run --rm -t --name autopocock-57-docker-runner-proof/);
+  assert.match(result.stdout, /--label autopocock\.managed=true/);
+  assert.match(result.stdout, /--label autopocock\.dispatch_id=dispatch-docker/);
   assert.match(result.stdout, /-e CODEX_HOME/);
   assert.match(result.stdout, /-v codex-cache:\/codex-cache/);
   assert.match(result.stdout, /No provider was invoked\. Docker isolation plan was prepared/);
@@ -1113,6 +1132,8 @@ test("run --execute --execute-docker launches the rendered Docker command", asyn
   assert.equal(metadata.runtime.docker.exit_code, 0);
   assert.match(metadata.command_output.stdout, /docker container ran/);
   assert.match(dockerLog, /run --rm -t --name autopocock-57-docker-runner-proof/);
+  assert.match(dockerLog, /--label autopocock\.managed=true/);
+  assert.match(dockerLog, /--label autopocock\.cleanup=container/);
   assert.match(dockerLog, /-e CODEX_HOME/);
   assert.match(dockerLog, /-v codex-cache:\/codex-cache/);
   assert.match(dockerLog, /--inside-docker/);
@@ -2430,6 +2451,80 @@ test("worktree-clean deletes only stale unreferenced worktrees when applied", as
   await stat(providerReferenced);
   await stat(youngUnreferenced);
   await assert.rejects(() => stat(staleUnreferenced));
+});
+
+test("docker:clean removes only stale stopped AutoPocock-managed containers when applied", async () => {
+  const cwd = await makeWorkspace();
+  const fakeDocker = await installFakeDocker(cwd);
+  const oldCreated = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+  const youngCreated = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const inspectOutput = [
+    {
+      Id: "oldcontainer1234567890",
+      Name: "/autopocock-old",
+      Created: oldCreated,
+      State: { Status: "exited" },
+      Config: {
+        Labels: {
+          "autopocock.managed": "true",
+          "autopocock.cleanup": "container",
+          "autopocock.dispatch_id": "dispatch-old",
+          "autopocock.issue_id": "57",
+        },
+      },
+    },
+    {
+      Id: "youngcontainer123456",
+      Name: "/autopocock-young",
+      Created: youngCreated,
+      State: { Status: "exited" },
+      Config: {
+        Labels: {
+          "autopocock.managed": "true",
+          "autopocock.cleanup": "container",
+          "autopocock.dispatch_id": "dispatch-young",
+        },
+      },
+    },
+    {
+      Id: "runningcontainer123",
+      Name: "/autopocock-running",
+      Created: oldCreated,
+      State: { Status: "running" },
+      Config: {
+        Labels: {
+          "autopocock.managed": "true",
+          "autopocock.cleanup": "container",
+          "autopocock.dispatch_id": "dispatch-running",
+        },
+      },
+    },
+  ];
+  const env = {
+    ...fakeDocker.env,
+    DOCKER_CONTAINER_LS_OUTPUT: "oldcontainer1234567890\nyoungcontainer123456\nrunningcontainer123",
+    DOCKER_INSPECT_OUTPUT: JSON.stringify(inspectOutput),
+  };
+
+  const dryRun = await runOps(cwd, ["docker:clean", "--max-age-hours", "1"], { env });
+
+  assert.equal(dryRun.code, 0, dryRun.stderr || dryRun.stdout);
+  assert.match(dryRun.stdout, /# Docker Cleanup/);
+  assert.match(dryRun.stdout, /Mode: dry-run/);
+  assert.match(dryRun.stdout, /delete: autopocock-old/);
+  assert.match(dryRun.stdout, /keep: autopocock-young/);
+  assert.match(dryRun.stdout, /keep: autopocock-running/);
+  assert.doesNotMatch(await readFile(fakeDocker.logPath, "utf8"), /container rm/);
+
+  const applied = await runOps(cwd, ["docker:clean", "--max-age-hours", "1", "--apply"], { env });
+  const dockerLog = await readFile(fakeDocker.logPath, "utf8");
+
+  assert.equal(applied.code, 0, applied.stderr || applied.stdout);
+  assert.match(applied.stdout, /Mode: apply/);
+  assert.match(applied.stdout, /Deleted: 1/);
+  assert.match(dockerLog, /container rm oldcontainer1234567890/);
+  assert.doesNotMatch(dockerLog, /container rm .*youngcontainer123456/);
+  assert.doesNotMatch(dockerLog, /container rm .*runningcontainer123/);
 });
 
 test("ralph initializes a durable run state and prints the first wave", async () => {

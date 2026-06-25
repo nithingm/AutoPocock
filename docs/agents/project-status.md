@@ -31,7 +31,7 @@ pnpm test
 
 Observed result:
 
-- 226 tests passed
+- 227 tests passed
 - 0 tests failed
 
 This proves the current local source tree is internally coherent.
@@ -56,7 +56,7 @@ Observed result:
 - `github:export -- --issue 45` writes a queue snapshot with 0 active non-Done items; issue `#45` is absent because it is closed and reconciled to Done.
 - the workflow console starts on an ephemeral local port, serves `/`, returns `/api/state`, and closes cleanly.
 - GitHub Actions CI on PR `#56` runs `pnpm install --frozen-lockfile`, `pnpm test`, and `pnpm smoke:console`; the latest run is green.
-- Docker Desktop was started and live Docker validation now runs. `node:22-bookworm` passed a no-network probe for `node` and `git`; it failed the deployment-level probes for `pnpm` and `codex`, proving the stock Node image is not yet the hardened provider execution image.
+- Docker Desktop was started and live Docker validation now runs. `node:22-bookworm` passed a no-network probe for `node` and `git`; it failed the deployment-level probes for `pnpm` and `codex`, proving the stock Node image is not yet the hardened provider execution image. Docker runner cleanup is dry-run-first through `pnpm ops docker:clean`; the live dry-run found no AutoPocock-managed containers to remove.
 
 ## Landed State
 
@@ -67,7 +67,7 @@ Current branch:
 - latest commits include the PR `#56` merge and post-merge status/verifier updates
 - merged PR: `https://github.com/nithingm/AutoPocock/pull/56`
 
-The landed baseline includes the manual OS, original GitHub-backed workflow hardening, automation-layer implementation, opt-in scheduler conflict inference, artifact and Provider Run mirror update/dedup behavior, durable memory proposal decision/apply flow, Codex plus Claude Code provider adapters, guarded fresh Project creation, dry-run-first Project field creation, tracker-visible claim leases, scheduler-enforced GitHub ref distributed claim locks plus text/JSON lock audit, scheduled audit workflow, and Actions run-summary dashboard, Docker isolation planning/guards, Docker image readiness validation, tests, CI workflow, and durable status/orientation artifacts.
+The landed baseline includes the manual OS, original GitHub-backed workflow hardening, automation-layer implementation, opt-in scheduler conflict inference, artifact and Provider Run mirror update/dedup behavior, durable memory proposal decision/apply flow, Codex plus Claude Code provider adapters, guarded fresh Project creation, dry-run-first Project field creation, tracker-visible claim leases, scheduler-enforced GitHub ref distributed claim locks plus text/JSON lock audit, scheduled audit workflow, and Actions run-summary dashboard, Docker isolation planning/guards, Docker image readiness validation, Docker-managed container labels and dry-run-first cleanup, tests, CI workflow, and durable status/orientation artifacts.
 
 Landed source/test/docs include:
 
@@ -160,7 +160,7 @@ The core landing and tracker reconciliation are complete. Remaining work is prod
 
 1. GitHub Project view setup is inspectable through GraphQL, including missing-view and name-drift reports. Creation and renaming remain manual because GitHub CLI/GraphQL do not expose ProjectV2 view mutations.
 2. Package the GitHub ref distributed lock path beyond the landed scheduler dispatch policy, `claim-locks` text/JSON audit, orphan cleanup command, scheduled GitHub Actions audit, and Actions run-summary dashboard: external operator dashboards only if needed.
-3. Build or choose the actual hardened Docker provider image, then rerun `pnpm ops docker:validate` against it. The stock `node:22-bookworm` image passes `node`/`git` checks but does not contain `pnpm` or the Codex provider CLI.
+3. Build or choose the actual hardened Docker provider image, then rerun `pnpm ops docker:validate` against it. The stock `node:22-bookworm` image passes `node`/`git` checks but does not contain `pnpm` or the Codex provider CLI. Docker cleanup policy is now implemented for stopped AutoPocock-managed containers; declared credential/cache volumes remain operator-owned and are intentionally not auto-deleted.
 4. Add more provider adapters only when a concrete provider boundary is needed beyond Codex and Claude Code.
 5. Run a live end-to-end validation after any follow-up changes:
    - `pnpm verify:project -- --strict-external`
