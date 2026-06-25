@@ -256,6 +256,83 @@ test("docker:build-provider builds the pinned provider image and validates provi
   assert.match(dockerLog, /claude --version/);
 });
 
+test("docker:publish-provider validates and prints a dry-run publish plan without pushing", async () => {
+  const cwd = await makeWorkspace();
+  const fakeDocker = await installFakeDocker(cwd);
+
+  const result = await runOps(cwd, [
+    "docker:publish-provider",
+    "--source-tag",
+    "autopocock-provider-runner:test",
+    "--target-tag",
+    "ghcr.io/example/autopocock-provider-runner:test",
+    "--provider",
+    "claude",
+    "--credential-env",
+    "CLAUDE_CONFIG_DIR",
+    "--credential-volume",
+    "claude-cache:/claude-cache",
+  ], {
+    env: fakeDocker.env,
+  });
+  const dockerLog = await readFile(fakeDocker.logPath, "utf8");
+
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /# Docker Provider Image Publish Plan/);
+  assert.match(result.stdout, /Mode: dry-run/);
+  assert.match(result.stdout, /Source image: autopocock-provider-runner:test/);
+  assert.match(result.stdout, /Target image: ghcr\.io\/example\/autopocock-provider-runner:test/);
+  assert.match(result.stdout, /Provider: claude/);
+  assert.match(result.stdout, /Credential env allowlist: CLAUDE_CONFIG_DIR/);
+  assert.match(result.stdout, /Credential volumes: claude-cache:\/claude-cache/);
+  assert.match(result.stdout, /Tag command: docker tag autopocock-provider-runner:test ghcr\.io\/example\/autopocock-provider-runner:test/);
+  assert.match(result.stdout, /Push command: docker push ghcr\.io\/example\/autopocock-provider-runner:test/);
+  assert.match(result.stdout, /Apply: rerun with `--apply --approved-by <operator>`/);
+  assert.match(dockerLog, /run --rm --network none autopocock-provider-runner:test sh -lc/);
+  assert.doesNotMatch(dockerLog, /tag autopocock-provider-runner:test/);
+  assert.doesNotMatch(dockerLog, /push ghcr\.io\/example\/autopocock-provider-runner:test/);
+});
+
+test("docker:publish-provider requires approval before applying tag and push", async () => {
+  const cwd = await makeWorkspace();
+  const fakeDocker = await installFakeDocker(cwd);
+
+  const blocked = await runOps(cwd, [
+    "docker:publish-provider",
+    "--target-tag",
+    "ghcr.io/example/autopocock-provider-runner:test",
+    "--apply",
+  ], {
+    env: fakeDocker.env,
+  });
+
+  assert.notEqual(blocked.code, 0);
+  assert.match(blocked.stderr, /requires --approved-by/);
+
+  const applied = await runOps(cwd, [
+    "docker:publish-provider",
+    "--source-tag",
+    "autopocock-provider-runner:test",
+    "--target-tag",
+    "ghcr.io/example/autopocock-provider-runner:test",
+    "--apply",
+    "--approved-by",
+    "solo-operator",
+  ], {
+    env: fakeDocker.env,
+  });
+  const dockerLog = await readFile(fakeDocker.logPath, "utf8");
+
+  assert.equal(applied.code, 0, applied.stderr || applied.stdout);
+  assert.match(applied.stdout, /Mode: apply/);
+  assert.match(applied.stdout, /Approved by: solo-operator/);
+  assert.match(applied.stdout, /Tag status: passed/);
+  assert.match(applied.stdout, /Push status: passed/);
+  assert.match(dockerLog, /run --rm --network none autopocock-provider-runner:test sh -lc/);
+  assert.match(dockerLog, /tag autopocock-provider-runner:test ghcr\.io\/example\/autopocock-provider-runner:test/);
+  assert.match(dockerLog, /push ghcr\.io\/example\/autopocock-provider-runner:test/);
+});
+
 test("github:export refuses to run without a project reference", async () => {
   const cwd = await makeWorkspace();
   const result = await runOps(cwd, ["github:export"]);

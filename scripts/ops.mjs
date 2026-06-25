@@ -129,6 +129,7 @@ Usage:
   pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --execute --execute-docker
   pnpm ops docker:validate -- --image node:22-bookworm --provider codex --require-command node,pnpm,git --docker-env CODEX_HOME
   pnpm ops docker:build-provider -- --tag autopocock-provider-runner:local --validate
+  pnpm ops docker:publish-provider -- --target-tag ghcr.io/OWNER/autopocock-provider-runner:TAG --approved-by solo-operator
   pnpm ops docker:clean -- --max-age-hours 24
   pnpm ops dispatch -- --issue 123 --title "Docker slice" --source manual --override-reason "Solo Operator approved" --isolation-mode docker --docker-env CODEX_HOME --docker-volume codex-cache:/codex-cache
   pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --execute
@@ -408,6 +409,46 @@ function dockerProviderImageValidationPlan(image) {
     network: "none",
     args,
     rendered_command: ["docker", ...args].join(" "),
+  };
+}
+
+function validateDockerImageRef(value, label) {
+  const text = String(value || "").trim();
+  if (!text) {
+    throw new Error(`${label} is required.`);
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/.test(text) || text.includes("..") || text.includes("//")) {
+    throw new Error(`${label} is not a supported Docker image reference: ${text}`);
+  }
+  return text;
+}
+
+function dockerProviderPublishPlan({
+  sourceTag = defaultProviderImageBuildArgs().tag,
+  targetTag = "",
+  provider = "codex",
+  env = [],
+  volumes = [],
+} = {}) {
+  const source = validateDockerImageRef(sourceTag, "Source image tag");
+  const target = validateDockerImageRef(targetTag, "Target image tag");
+  const envAllowlist = uniqueList(env.map((name) => validateShellToken(name, "Environment variable")));
+  const credentialVolumes = uniqueList(volumes);
+  const validation = dockerProviderImageValidationPlan(source);
+  const tagArgs = ["tag", source, target];
+  const pushArgs = ["push", target];
+
+  return {
+    sourceTag: source,
+    targetTag: target,
+    provider,
+    envAllowlist,
+    credentialVolumes,
+    validation,
+    tagArgs,
+    pushArgs,
+    tagCommand: ["docker", ...tagArgs].join(" "),
+    pushCommand: ["docker", ...pushArgs].join(" "),
   };
 }
 
@@ -3586,6 +3627,126 @@ async function dockerBuildProvider(args) {
   process.stdout.write(`${lines.join("\n")}\n`);
 }
 
+async function dockerPublishProvider(args) {
+  const defaults = defaultProviderImageBuildArgs();
+  const sourceTag = readOption(args, "source-tag", readOption(args, "tag", defaults.tag));
+  const targetTag = readOption(args, "target-tag", "");
+  const provider = readOption(args, "provider", "codex");
+  const envAllowlist = uniqueList([
+    ...splitOptionList(readOption(args, "docker-env")),
+    ...splitOptionList(readOption(args, "credential-env")),
+  ]);
+  const credentialVolumes = uniqueList([
+    ...splitOptionList(readOption(args, "docker-volume")),
+    ...splitOptionList(readOption(args, "credential-volume")),
+  ]);
+  const apply = args.includes("--apply");
+  const approvedBy = readOption(args, "approved-by", "");
+
+  if (!targetTag) {
+    throw new Error("docker:publish-provider requires --target-tag, for example ghcr.io/OWNER/autopocock-provider-runner:TAG.");
+  }
+  if (apply && !approvedBy) {
+    throw new Error("docker:publish-provider -- --apply requires --approved-by.");
+  }
+
+  const dockerReadiness = await commandAvailable("docker");
+  if (!dockerReadiness.available) {
+    throw new Error(`docker:publish-provider requires Docker CLI. ${dockerReadiness.stderr || "Docker was not found."}`);
+  }
+
+  const plan = dockerProviderPublishPlan({
+    sourceTag,
+    targetTag,
+    provider,
+    env: envAllowlist,
+    volumes: credentialVolumes,
+  });
+
+  let validationExecution;
+  try {
+    validationExecution = await runCommand(dockerReadiness.command || "docker", plan.validation.args, {
+      cwd,
+      maxBuffer: 1024 * 1024 * 10,
+    });
+  } catch (error) {
+    throw new Error(
+      [
+        "Docker provider image publish stopped because source image validation failed.",
+        `Source image: ${plan.sourceTag}`,
+        `Validation command: ${plan.validation.rendered_command}`,
+        error.stdout ? `stdout: ${error.stdout}` : "",
+        error.stderr ? `stderr: ${error.stderr}` : "",
+        error.message && !error.stderr ? error.message : "",
+      ].filter(Boolean).join("\n"),
+    );
+  }
+
+  let tagExecution = null;
+  let pushExecution = null;
+  if (apply) {
+    tagExecution = await runCommand(dockerReadiness.command || "docker", plan.tagArgs, {
+      cwd,
+      maxBuffer: 1024 * 1024 * 10,
+    });
+    pushExecution = await runCommand(dockerReadiness.command || "docker", plan.pushArgs, {
+      cwd,
+      maxBuffer: 1024 * 1024 * 20,
+    });
+  }
+
+  const lines = [
+    "# Docker Provider Image Publish Plan",
+    "",
+    `Mode: ${apply ? "apply" : "dry-run"}`,
+    `Source image: ${plan.sourceTag}`,
+    `Target image: ${plan.targetTag}`,
+    `Provider: ${plan.provider}`,
+    `Credential env allowlist: ${plan.envAllowlist.join(", ") || "none"}`,
+    `Credential volumes: ${plan.credentialVolumes.join(", ") || "none"}`,
+    `Credential policy: credentials are not baked into the image; runtime dispatches must opt in with --docker-env or --docker-volume.`,
+    `Registry auth: use docker login for the target registry before --apply.`,
+    "",
+    "## Validation",
+    "",
+    `Docker command: ${plan.validation.rendered_command}`,
+    `Required commands: ${plan.validation.requiredCommands.join(", ")}`,
+    "Status: passed",
+    "",
+    "## Publish Commands",
+    "",
+    `Tag command: ${plan.tagCommand}`,
+    `Push command: ${plan.pushCommand}`,
+  ];
+
+  if (!apply) {
+    lines.push("", "Apply: rerun with `--apply --approved-by <operator>` after registry/tag and credential policy are accepted.");
+  } else {
+    lines.push("", "## Apply Results", "", `Approved by: ${approvedBy}`, "Tag status: passed", "Push status: passed");
+    if (tagExecution?.stdout) {
+      lines.push("", "### Tag stdout", "", tagExecution.stdout.trim());
+    }
+    if (tagExecution?.stderr) {
+      lines.push("", "### Tag stderr", "", tagExecution.stderr.trim());
+    }
+    if (pushExecution?.stdout) {
+      lines.push("", "### Push stdout", "", pushExecution.stdout.trim());
+    }
+    if (pushExecution?.stderr) {
+      lines.push("", "### Push stderr", "", pushExecution.stderr.trim());
+    }
+  }
+
+  if (validationExecution.stdout) {
+    lines.push("", "## Validation stdout", "", validationExecution.stdout.trim());
+  }
+  if (validationExecution.stderr) {
+    lines.push("", "## Validation stderr", "", validationExecution.stderr.trim());
+  }
+
+  process.stdout.write(`${lines.join("\n")}\n`);
+}
+
 function parseDockerInspectOutput(stdout) {
   const text = String(stdout || "").trim();
   if (!text) {
@@ -4826,6 +4987,11 @@ async function main() {
 
   if (command === "docker:build-provider") {
     await dockerBuildProvider(args);
+    return;
+  }
+
+  if (command === "docker:publish-provider") {
+    await dockerPublishProvider(args);
     return;
   }
 
