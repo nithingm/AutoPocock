@@ -12,7 +12,8 @@ Branch state:
 - `main`
 - aligned with `origin/main`
 - PR `#56` merged: `https://github.com/nithingm/AutoPocock/pull/56`
-- local working tree still has untracked scratch/demo artifacts outside the PR
+- follow-up memory proposal decision/apply flow is part of the current source review surface
+- local working tree may still have untracked scratch/demo artifacts outside the landed source work
 
 External tracker state:
 
@@ -36,7 +37,7 @@ Observed:
 
 - strict project verification passed for local readiness, Project read path, Project write scope, and issue `#45` closed terminal state
 - setup ready
-- 187 tests passed
+- 193 tests passed
 - export wrote `.ai/queue.json` with 0 active non-Done items
 - workflow console smoke passed on an ephemeral local port and closed cleanly
 - GitHub Actions CI passed for PR `#56` and for `main` after the merge
@@ -90,6 +91,7 @@ The implementation modules are the bulk of the automation layer:
 - `scripts/lib/layered-dag-compiler.mjs`
 - `scripts/lib/layered-dag-regeneration.mjs`
 - `scripts/lib/layered-dag-schema.mjs`
+- `scripts/lib/memory-proposals.mjs`
 - `scripts/lib/prd-plane.mjs`
 - `scripts/lib/project-verifier.mjs`
 - `scripts/lib/provider-runner.mjs`
@@ -135,6 +137,7 @@ The tests are the strongest implementation evidence for the automation layer:
 - `tests/wave-approval-plane.test.mjs`
 - `tests/workflow-console.test.mjs`
 - `tests/workflow-core.test.mjs`
+- `tests/issue9-memory-propose.test.mjs`
 
 Review meaning:
 
@@ -301,6 +304,9 @@ Likely files:
 - `docs/agents/project-status.md`
 - `docs/agents/knowledge-map.md`
 - `docs/agents/local-change-inventory.md`
+- `docs/agents/workflow.md`
+- `docs/agents/manual-walkthrough.md`
+- `docs/agents/manual-acceptance-checklist.md`
 - `docs/agents/hitl/2026-06-25-github-project-scope-needed.md`
 - durable PRDs, issue DAGs, handoffs, loop specs, completions, review prep, and validation notes selected during review
 

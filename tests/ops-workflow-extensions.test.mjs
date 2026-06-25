@@ -561,6 +561,142 @@ test("memory-propose writes json and markdown proposal artifacts", async () => {
   assert.match(markdown, /# Durable Memory Proposal: Capture review gate policy/);
 });
 
+test("memory-decision approves a proposal without applying target file changes by default", async () => {
+  const cwd = await makeWorkspace();
+  await writeFile(path.join(cwd, "docs", "agents", "workflow.md"), "# Workflow\n");
+  const proposalResult = await runOps(cwd, [
+    "memory-propose",
+    "--type",
+    "workflow",
+    "--title",
+    "Capture review gate policy",
+    "--rationale",
+    "The workflow contract changed and needs an approval artifact.",
+    "--target-files",
+    "docs/agents/workflow.md",
+    "--suggested-text",
+    "Review Prep must only be generated after the Review Entry Gate passes.",
+    "--accept-risk",
+    "The durable memory may need another update later.",
+    "--reject-risk",
+    "Operators may repeat the same workflow decision manually.",
+  ]);
+  const [jsonPath, markdownPath] = proposalResult.stdout.trim().split(/\r?\n/);
+
+  const decisionResult = await runOps(cwd, [
+    "memory-decision",
+    "--proposal",
+    jsonPath,
+    "--decision",
+    "approve",
+    "--approved-by",
+    "solo-operator",
+    "--reason",
+    "This should become durable workflow memory.",
+  ]);
+  const json = JSON.parse(await readFile(jsonPath, "utf8"));
+  const markdown = await readFile(markdownPath, "utf8");
+  const target = await readFile(path.join(cwd, "docs", "agents", "workflow.md"), "utf8");
+
+  assert.equal(decisionResult.code, 0, decisionResult.stderr);
+  assert.equal(json.status, "approved");
+  assert.equal(json.decision.by, "solo-operator");
+  assert.match(markdown, /## Decision/);
+  assert.equal(target, "# Workflow\n");
+});
+
+test("memory-decision --apply appends approved proposal text with an idempotent marker", async () => {
+  const cwd = await makeWorkspace();
+  const targetPath = path.join(cwd, "docs", "agents", "workflow.md");
+  await writeFile(targetPath, "# Workflow\n");
+  const proposalResult = await runOps(cwd, [
+    "memory-propose",
+    "--type",
+    "workflow",
+    "--title",
+    "Capture review gate policy",
+    "--rationale",
+    "The workflow contract changed and needs an approval artifact.",
+    "--target-files",
+    "docs/agents/workflow.md",
+    "--suggested-text",
+    "Review Prep must only be generated after the Review Entry Gate passes.",
+    "--accept-risk",
+    "The durable memory may need another update later.",
+    "--reject-risk",
+    "Operators may repeat the same workflow decision manually.",
+  ]);
+  const [jsonPath, markdownPath] = proposalResult.stdout.trim().split(/\r?\n/);
+
+  const applyResult = await runOps(cwd, [
+    "memory-decision",
+    "--proposal",
+    jsonPath,
+    "--decision",
+    "approve",
+    "--approved-by",
+    "solo-operator",
+    "--reason",
+    "This should become durable workflow memory.",
+    "--apply",
+  ]);
+  const secondApply = await runOps(cwd, [
+    "memory-decision",
+    "--proposal",
+    jsonPath,
+    "--approved-by",
+    "solo-operator",
+    "--apply",
+  ]);
+  const json = JSON.parse(await readFile(jsonPath, "utf8"));
+  const markdown = await readFile(markdownPath, "utf8");
+  const target = await readFile(targetPath, "utf8");
+  const occurrences = target.match(/<!-- memory-proposal:/g) || [];
+
+  assert.equal(applyResult.code, 0, applyResult.stderr);
+  assert.equal(secondApply.code, 0, secondApply.stderr);
+  assert.equal(json.status, "applied");
+  assert.equal(json.application.applied_by, "solo-operator");
+  assert.match(markdown, /## Application/);
+  assert.match(target, /Review Prep must only be generated after the Review Entry Gate passes/);
+  assert.equal(occurrences.length, 1);
+});
+
+test("memory-decision --apply requires explicit approval or an approved proposal", async () => {
+  const cwd = await makeWorkspace();
+  await writeFile(path.join(cwd, "docs", "agents", "workflow.md"), "# Workflow\n");
+  const proposalResult = await runOps(cwd, [
+    "memory-propose",
+    "--type",
+    "workflow",
+    "--title",
+    "Capture review gate policy",
+    "--rationale",
+    "The workflow contract changed and needs an approval artifact.",
+    "--target-files",
+    "docs/agents/workflow.md",
+    "--suggested-text",
+    "Review Prep must only be generated after the Review Entry Gate passes.",
+    "--accept-risk",
+    "The durable memory may need another update later.",
+    "--reject-risk",
+    "Operators may repeat the same workflow decision manually.",
+  ]);
+  const [jsonPath] = proposalResult.stdout.trim().split(/\r?\n/);
+
+  const applyResult = await runOps(cwd, [
+    "memory-decision",
+    "--proposal",
+    jsonPath,
+    "--approved-by",
+    "solo-operator",
+    "--apply",
+  ]);
+
+  assert.notEqual(applyResult.code, 0);
+  assert.match(applyResult.stderr, /requires an already approved proposal/);
+});
+
 test("mirror prints a dry-run comment target and summarized body", async () => {
   const cwd = await makeWorkspace();
   const artifactDir = path.join(cwd, "docs", "agents", "completions");

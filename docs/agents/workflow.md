@@ -44,6 +44,7 @@ The Umbrella CLI stages the workflow:
 - `pnpm ops review-decision -- --dag issues/file.json --issue 123 --node node-1 --decision approve --approved-by solo-operator`: apply an explicit review approval or rejection to a DAG node and write a durable review decision artifact
 - `pnpm ops qa-decision -- --dag issues/file.json --issue 123 --node node-1 --decision pass --approved-by solo-operator`: apply an explicit QA pass or fail to a DAG node, write a QA decision artifact, and create a follow-up bug draft automatically on QA failure
 - `pnpm ops memory-propose -- --type workflow --title "Update workflow contract" --rationale "Why this belongs in durable memory" --target-files "docs/agents/workflow.md|CONTEXT.md" --suggested-text "Proposed durable memory text" --accept-risk "Risk if accepted" --reject-risk "Risk if rejected"`: create durable memory proposal artifacts without editing durable memory directly
+- `pnpm ops memory-decision -- --proposal docs/agents/memory-proposals/file.json --decision approve --approved-by solo-operator --reason "Accepted"`: record approval or rejection for a durable memory proposal; add `--apply` with approval to append the proposal text to repo target files using an idempotent marker
 - `pnpm ops mirror -- --artifact docs/agents/handoffs/file.md --issue 123`: dry-run a selective GitHub comment mirror for supported workflow artifacts
 - `pnpm ops feedback -- --issue 123 --finding "QA finding text"`: classify a QA finding into a Same-PR Fix candidate or a new bug draft, and write a local feedback artifact without mutating GitHub; add `--pr 456` only when a PR already exists, and add `--apply` only when you intentionally want the GitHub mutation
 - `pnpm ops dispatch -- --issue 123 --title "Implement slice" --source manual --override-reason "Solo Operator approved"`: create dispatch-ready artifacts without calling a subagent
@@ -138,6 +139,16 @@ Review and QA progression are now durable workflow transitions, not implicit hum
 - `pnpm ops qa-decision` requires prior review approval and records either `pass` or `fail`.
 - QA pass moves the node to `done` and unlocks dependents only when all dependencies are complete.
 - QA fail moves the node to `bug_loop` and creates a follow-up bug draft under `docs/agents/feedback/`.
+
+## Durable Memory Proposal Decisions
+
+`pnpm ops memory-propose` is local-first and writes proposal JSON plus markdown under `docs/agents/memory-proposals/`.
+
+- `pnpm ops memory-decision -- --proposal <proposal.json> --decision approve --approved-by <operator> --reason "<reason>"` records approval without changing target files.
+- `pnpm ops memory-decision -- --proposal <proposal.json> --decision reject --approved-by <operator> --reason "<reason>"` records rejection and leaves target files unchanged.
+- `pnpm ops memory-decision -- --proposal <proposal.json> --decision approve --approved-by <operator> --reason "<reason>" --apply` approves and appends the proposal text to each repo target file with an idempotent `memory-proposal` marker.
+- `pnpm ops memory-decision -- --proposal <approved-proposal.json> --approved-by <operator> --apply` applies an already approved proposal.
+- The apply path edits only repo target files named by the proposal. It does not mutate external Codex memory or any user-level memory store.
 
 ## Targeted QA
 

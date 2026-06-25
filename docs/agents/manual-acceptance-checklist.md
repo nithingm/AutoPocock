@@ -130,6 +130,20 @@ Evidence:
 - `docs/agents/validations/2026-05-14-issue-4-real-run-happy-path-audit.md`
 - `docs/agents/validations/2026-05-14-issue-15-audit-reconciliation-pass.md`
 
+### 11. Durable memory decisions are explicit
+
+- [x] Durable memory proposals can be approved or rejected without editing target files.
+- [x] Approved proposals can be applied to repo target files with an idempotent marker.
+- [x] The docs distinguish repo-local memory proposal application from external/user-level memory mutation.
+
+Evidence:
+
+- `scripts/lib/memory-proposals.mjs`
+- `scripts/ops.mjs`
+- `tests/issue9-memory-propose.test.mjs`
+- `tests/ops-workflow-extensions.test.mjs`
+- `docs/agents/workflow.md`
+
 ## Current Status
 
 Updated: 2026-06-25

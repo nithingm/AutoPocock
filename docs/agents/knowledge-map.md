@@ -9,7 +9,7 @@ This is the operator-facing map of where the project's knowledge lives and how t
 
 AutoPocock is no longer just a manual repo template. The accepted manual operating system is present, documented, and test-backed in the current working tree. On top of that, the local tree now contains a broader provider/DAG/Ralph orchestration layer with test coverage.
 
-The automation layer is now landed on `origin/main` through PR `#56`. It is committed, merged, CI-backed, and reconciled in GitHub Issues and Project fields.
+The automation layer is now landed on `origin/main` through PR `#56`, with a follow-up memory proposal decision/apply flow added on `main`. It is committed, CI-backed, and reconciled in GitHub Issues and Project fields.
 
 ## Read These First
 
@@ -62,6 +62,7 @@ The artifact layer under `docs/agents/` and `issues/` records the workflow histo
 - review prep: `docs/agents/reviews/`
 - QA feedback and bug drafts: `docs/agents/feedback/`
 - HITL tasks: `docs/agents/hitl/`
+- durable memory proposals and decisions: `docs/agents/memory-proposals/`
 
 These are durable Workflow Artifacts when they explain a decision, handoff, review, or validation. Runtime scratch files under `.ai/` should not become durable truth unless explicitly promoted.
 
@@ -89,7 +90,7 @@ pnpm test
 
 Observed:
 
-- 187 tests passed
+- 193 tests passed
 - 0 tests failed
 
 Latest readiness checks recorded there:

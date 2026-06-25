@@ -5,7 +5,13 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { buildReviewPrep, parseCompletionReport } from "./lib/review-gate.mjs";
 import { createGitHubBootstrapReport } from "./lib/github-init.mjs";
-import { createMemoryProposal, writeMemoryProposalArtifact } from "./lib/memory-proposals.mjs";
+import {
+  applyMemoryProposalToText,
+  createMemoryProposal,
+  decideMemoryProposal,
+  markMemoryProposalApplied,
+  writeMemoryProposalArtifact,
+} from "./lib/memory-proposals.mjs";
 import { buildMirrorComment, renderMirrorPlan } from "./lib/artifact-mirror.mjs";
 import { classifyFeedback, createFeedbackArtifactSuggestion, renderFeedbackClassification } from "./lib/feedback-classifier.mjs";
 import {
@@ -81,6 +87,7 @@ Usage:
   pnpm ops review-decision -- --dag issues/file.json --node node-1 --decision approve --approved-by solo-operator
   pnpm ops qa-decision -- --dag issues/file.json --node node-1 --decision pass --approved-by solo-operator
   pnpm ops memory-propose -- --type workflow --title "Update workflow contract"
+  pnpm ops memory-decision -- --proposal docs/agents/memory-proposals/file.json --decision approve --approved-by solo-operator --reason "Accepted"
   pnpm ops mirror -- --artifact docs/agents/handoffs/file.md --issue 123
   pnpm ops feedback -- --issue 123 --pr 456 --finding "QA finding text"
   pnpm ops dispatch -- --issue 123 --title "Implement slice" --source manual --override-reason "Solo Operator approved"
@@ -192,6 +199,15 @@ function formatIssueRef(value) {
 function repoRelativePath(targetPath) {
   const resolved = path.isAbsolute(targetPath) ? targetPath : path.join(cwd, targetPath);
   return path.relative(cwd, resolved).replace(/\\/g, "/");
+}
+
+function resolveRepoContainedPath(targetPath) {
+  const resolved = path.isAbsolute(targetPath) ? targetPath : path.join(cwd, targetPath);
+  const relative = path.relative(cwd, resolved);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`Path escapes the workspace: ${targetPath}`);
+  }
+  return resolved;
 }
 
 function formatReviewPrepCommand(issue, completionPath = "") {
@@ -1239,6 +1255,89 @@ async function feedbackCommand(args) {
     process.stdout.write(`${githubResult}\n`);
   }
   process.stdout.write(`\n${jsonTarget}\n${markdownTarget}\n`);
+}
+
+async function memoryDecisionCommand(args) {
+  const proposalPath = readOption(args, "proposal");
+  const decision = readOption(args, "decision");
+  const normalizedDecision = decision?.toLowerCase();
+  const approvedBy = readOption(args, "approved-by");
+  const reason = readOption(args, "reason");
+  const apply = args.includes("--apply");
+
+  if (!proposalPath) {
+    throw new Error("memory-decision requires --proposal.");
+  }
+
+  if (apply && decision && normalizedDecision !== "approve") {
+    throw new Error("memory-decision -- --apply is only valid with --decision approve.");
+  }
+
+  const jsonPath = resolveRepoContainedPath(proposalPath);
+  const proposal = JSON.parse(await readFile(jsonPath, "utf8"));
+  const canonicalJsonPath = path.join(cwd, "docs", "agents", "memory-proposals", `${proposal.proposal_id}.json`);
+  const canonicalMarkdownPath = path.join(cwd, "docs", "agents", "memory-proposals", `${proposal.proposal_id}.md`);
+  if (jsonPath !== canonicalJsonPath) {
+    throw new Error(`Memory proposal path does not match proposal id ${proposal.proposal_id}: ${proposalPath}`);
+  }
+
+  if (apply && !decision && proposal.status === "applied") {
+    process.stdout.write(`${jsonPath}\n${canonicalMarkdownPath}\n`);
+    process.stdout.write(`Memory proposal ${proposal.proposal_id} is already applied.\n`);
+    return;
+  }
+
+  if (apply && !decision && proposal.status !== "approved") {
+    throw new Error("memory-decision -- --apply without --decision approve requires an already approved proposal.");
+  }
+
+  let next = proposal;
+
+  if (decision) {
+    next = decideMemoryProposal(proposal, {
+      decision,
+      by: approvedBy,
+      reason,
+    });
+  }
+
+  const appliedTargets = [];
+  if (apply) {
+    const approvedProposal = next.status === "approved"
+      ? next
+      : decideMemoryProposal(next, {
+          decision: "approve",
+          by: approvedBy,
+          reason: reason || "Approved for apply.",
+        });
+
+    for (const targetFile of approvedProposal.target_files) {
+      const targetPath = resolveRepoContainedPath(targetFile);
+      if (!(await pathExists(targetPath))) {
+        throw new Error(`Memory proposal target file not found: ${targetFile}`);
+      }
+
+      const existing = await readFile(targetPath, "utf8");
+      const applied = applyMemoryProposalToText(existing, approvedProposal);
+      if (applied.changed) {
+        await writeFile(targetPath, applied.text, "utf8");
+      }
+      appliedTargets.push(repoRelativePath(targetPath));
+    }
+
+    next = markMemoryProposalApplied(approvedProposal, {
+      appliedBy: approvedBy,
+      targetFiles: appliedTargets,
+    });
+  }
+
+  await writeMemoryProposalArtifact(cwd, next);
+
+  process.stdout.write(`${jsonPath}\n${canonicalMarkdownPath}\n`);
+  process.stdout.write(`Memory proposal ${next.proposal_id} is ${next.status}.\n`);
+  if (appliedTargets.length > 0) {
+    process.stdout.write(`Applied to: ${appliedTargets.join(", ")}\n`);
+  }
 }
 
 async function gitHubInit(args = []) {
@@ -2936,6 +3035,11 @@ async function main() {
     });
     const written = await writeMemoryProposalArtifact(cwd, proposal);
     process.stdout.write(`${written.jsonPath}\n${written.markdownPath}\n`);
+    return;
+  }
+
+  if (command === "memory-decision") {
+    await memoryDecisionCommand(args);
     return;
   }
 

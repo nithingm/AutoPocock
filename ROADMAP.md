@@ -101,6 +101,7 @@ Execution lanes:
 - `pnpm ops github:export`: export GitHub issue/project metadata into `.ai/queue.json`.
 - `pnpm ops mirror`: summarize supported local workflow artifacts into dry-run GitHub comment bodies; `--apply` posts with an explicit GitHub mutation.
 - `pnpm ops memory-propose`: create durable memory proposal artifacts without editing durable memory directly.
+- `pnpm ops memory-decision`: record Durable Memory proposal approval/rejection and optionally apply approved repo-local target-file updates.
 - `pnpm ops schedule -- --apply`: update GitHub Project fields for `DISPATCH` decisions without creating dispatch artifacts.
 - `pnpm ops schedule -- --dispatch`: create dispatch artifacts from a Scheduler Plan.
 - `pnpm ops dispatch`: create audited manual dispatch artifacts, while scheduler-sourced dispatches are created by `schedule -- --dispatch`.
@@ -119,7 +120,7 @@ Execution lanes:
 - How to infer advisory Conflict Surface from file paths and active PRs.
 - Whether local body-file mirroring should gain richer duplicate/comment-update behavior.
 - How to extend Dispatch Claim locking beyond local filesystem coordination for distributed runners.
-- How to summarize Durable Memory update proposals for Solo Operator approval.
+- How approved repo-local Durable Memory decisions should sync into external/user-level memory stores, if that becomes part of the product boundary.
 
 ## Locked GitHub Bootstrap Decisions
 

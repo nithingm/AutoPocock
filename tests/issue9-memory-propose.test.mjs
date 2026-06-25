@@ -6,8 +6,12 @@ import { test } from "node:test";
 
 import {
   MEMORY_PROPOSAL_DIR,
+  applyMemoryProposalToText,
   createMemoryProposal,
+  decideMemoryProposal,
   getMemoryProposalPaths,
+  markMemoryProposalApplied,
+  memoryProposalMarker,
   renderMemoryProposalMarkdown,
   writeMemoryProposalArtifact,
 } from "../scripts/lib/memory-proposals.mjs";
@@ -84,4 +88,65 @@ test("writeMemoryProposalArtifact writes json and markdown under docs/agents/mem
   assert.equal(written.jsonPath, paths.jsonPath);
   assert.equal(json.type, "context");
   assert.match(markdown, /Document that local export artifacts are the fallback/);
+});
+
+test("decideMemoryProposal records approval and rejection metadata", () => {
+  const proposal = createMemoryProposal(makeInput(), {
+    createdAt: "2026-05-14T15:30:00.000Z",
+  });
+
+  const approved = decideMemoryProposal(proposal, {
+    decision: "approve",
+    by: "solo-operator",
+    reason: "This belongs in durable workflow memory.",
+    decidedAt: "2026-05-14T16:00:00.000Z",
+  });
+  const rejected = decideMemoryProposal(proposal, {
+    decision: "reject",
+    by: "solo-operator",
+    reason: "Not durable enough.",
+    decidedAt: "2026-05-14T17:00:00.000Z",
+  });
+
+  assert.equal(approved.status, "approved");
+  assert.equal(approved.decision.by, "solo-operator");
+  assert.equal(rejected.status, "rejected");
+  assert.match(renderMemoryProposalMarkdown(approved), /## Decision/);
+});
+
+test("applyMemoryProposalToText appends an idempotent marked block", () => {
+  const proposal = decideMemoryProposal(createMemoryProposal(makeInput()), {
+    decision: "approve",
+    by: "solo-operator",
+    reason: "Accepted.",
+  });
+  const first = applyMemoryProposalToText("# Workflow\n", proposal);
+  const second = applyMemoryProposalToText(first.text, proposal);
+  const marker = memoryProposalMarker(proposal.proposal_id);
+
+  assert.equal(first.changed, true);
+  assert.equal(second.changed, false);
+  assert.match(first.text, new RegExp(marker.start.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(first.text, /Document that local export artifacts are the fallback/);
+});
+
+test("markMemoryProposalApplied records application metadata only after approval", () => {
+  const proposal = createMemoryProposal(makeInput());
+
+  assert.throws(() => markMemoryProposalApplied(proposal, { appliedBy: "solo-operator" }), /must be approved/);
+
+  const approved = decideMemoryProposal(proposal, {
+    decision: "approve",
+    by: "solo-operator",
+    reason: "Accepted.",
+  });
+  const applied = markMemoryProposalApplied(approved, {
+    appliedBy: "solo-operator",
+    appliedAt: "2026-05-14T18:00:00.000Z",
+    targetFiles: ["docs/agents/workflow.md"],
+  });
+
+  assert.equal(applied.status, "applied");
+  assert.equal(applied.application.applied_by, "solo-operator");
+  assert.match(renderMemoryProposalMarkdown(applied), /## Application/);
 });

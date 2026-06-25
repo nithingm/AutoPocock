@@ -414,6 +414,27 @@ Exact next command:
 # Either create the new bug in GitHub from the local draft, or take an explicit Same-PR Fix decision before widening scope.
 ```
 
+## Optional Durable Memory Decision
+
+Use this only when the slice produced a workflow or context decision that should become repo-local durable memory.
+
+Prerequisites:
+- A proposal exists under `docs/agents/memory-proposals/`.
+- The target files listed by the proposal are repo files and still exist.
+
+Commands:
+
+```bash
+pnpm ops memory-decision -- --proposal docs/agents/memory-proposals/<proposal-id>.json --decision approve --approved-by solo-operator --reason "Accepted"
+pnpm ops memory-decision -- --proposal docs/agents/memory-proposals/<proposal-id>.json --decision approve --approved-by solo-operator --reason "Accepted" --apply
+pnpm ops memory-decision -- --proposal docs/agents/memory-proposals/<proposal-id>.json --decision reject --approved-by solo-operator --reason "Not durable enough"
+```
+
+Expected artifact or output:
+- Records approval or rejection in the proposal JSON and markdown.
+- With `--apply`, appends the approved proposal text to each target file with an idempotent `memory-proposal` marker.
+- Does not mutate external Codex memory or any user-level memory store.
+
 ## When The Slice Counts As Done
 
 Treat the slice as done only when:

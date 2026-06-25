@@ -57,7 +57,7 @@ The manual OS assumes GitHub is the live tracker, but the repo stays local-first
 - `.ai/memory/`: durable project memory and ubiquitous language
 - `docs/agents/`: tracker, board, handoff, and workflow contracts
 - `docs/agents/feedback/`: local QA feedback artifacts for Same-PR Fix proposals and bug drafts
-- `docs/agents/memory-proposals/`: proposed durable memory changes awaiting Solo Operator approval
+- `docs/agents/memory-proposals/`: proposed durable memory changes plus recorded approve/reject/apply decisions
 - `docs/PRDs/`: product requirement documents
 - `docs/QA/`: generated and curated QA artifacts
 - `issues/`: issue drafts and bug follow-ups
@@ -118,4 +118,5 @@ What counts as done for a slice in the manual OS:
 6. Export or prepare queue input, then run `pnpm ops schedule -- --apply` to reserve eligible AFK work on the Project, `pnpm ops schedule -- --dispatch` to create dispatch artifacts, or both flags together when you want the generated `Dispatch ID` reflected in GitHub.
 7. Run `pnpm ops qa`.
 8. Run `pnpm ops feedback` to classify QA findings before deciding on Same-PR fixes or bug follow-ups. Add `--apply` only when you intentionally want the PR comment or follow-up issue created in GitHub.
-9. Capture defects as new issues instead of widening the current change.
+9. Use `pnpm ops memory-propose` and `pnpm ops memory-decision` when a workflow decision should become repo-local durable memory.
+10. Capture defects as new issues instead of widening the current change.

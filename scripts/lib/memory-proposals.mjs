@@ -70,6 +70,29 @@ export function createMemoryProposal(input, options = {}) {
 }
 
 export function renderMemoryProposalMarkdown(proposal) {
+  const decision = proposal.decision;
+  const application = proposal.application;
+  const decisionSection = decision
+    ? `
+## Decision
+
+- Decision: ${decision.decision}
+- By: ${decision.by}
+- At: ${decision.at}
+- Reason: ${decision.reason}
+`
+    : "";
+  const applicationSection = application
+    ? `
+## Application
+
+- Applied at: ${application.applied_at}
+- Applied by: ${application.applied_by}
+- Target files:
+${application.target_files.map((targetFile) => `  - ${targetFile}`).join("\n")}
+`
+    : "";
+
   return `# Durable Memory Proposal: ${proposal.title}
 
 - Proposal ID: ${proposal.proposal_id}
@@ -93,7 +116,85 @@ ${proposal.suggested_text}
 
 - If accepted: ${proposal.risk.accept_if_accepted}
 - If rejected: ${proposal.risk.if_rejected}
+${decisionSection}${applicationSection}
 `;
+}
+
+export function decideMemoryProposal(proposalInput, { decision, by, reason = "", decidedAt = new Date().toISOString() } = {}) {
+  const normalizedDecision = assertNonEmptyString(decision, "decision").toLowerCase();
+  if (!["approve", "reject"].includes(normalizedDecision)) {
+    throw new Error('Memory proposal decision must be "approve" or "reject".');
+  }
+
+  if (proposalInput.status === "applied") {
+    throw new Error(`Memory proposal ${proposalInput.proposal_id} is already applied.`);
+  }
+
+  const byValue = assertNonEmptyString(by, "by");
+  const reasonValue = assertNonEmptyString(reason, "reason");
+
+  return {
+    ...proposalInput,
+    status: normalizedDecision === "approve" ? "approved" : "rejected",
+    decision: {
+      decision: normalizedDecision,
+      by: byValue,
+      at: decidedAt,
+      reason: reasonValue,
+    },
+  };
+}
+
+export function memoryProposalMarker(proposalId) {
+  return {
+    start: `<!-- memory-proposal:${proposalId} -->`,
+    end: `<!-- /memory-proposal:${proposalId} -->`,
+  };
+}
+
+export function applyMemoryProposalToText(existingText, proposal) {
+  if (proposal.status !== "approved") {
+    throw new Error(`Memory proposal ${proposal.proposal_id} must be approved before apply.`);
+  }
+
+  const marker = memoryProposalMarker(proposal.proposal_id);
+  if (existingText.includes(marker.start)) {
+    return { text: existingText, changed: false };
+  }
+
+  const suffix = existingText.endsWith("\n") ? "" : "\n";
+  const block = [
+    "",
+    marker.start,
+    proposal.suggested_text,
+    marker.end,
+    "",
+  ].join("\n");
+
+  return {
+    text: `${existingText}${suffix}${block}`,
+    changed: true,
+  };
+}
+
+export function markMemoryProposalApplied(proposalInput, {
+  appliedBy,
+  appliedAt = new Date().toISOString(),
+  targetFiles = proposalInput.target_files,
+} = {}) {
+  if (proposalInput.status !== "approved") {
+    throw new Error(`Memory proposal ${proposalInput.proposal_id} must be approved before apply.`);
+  }
+
+  return {
+    ...proposalInput,
+    status: "applied",
+    application: {
+      applied_by: assertNonEmptyString(appliedBy, "appliedBy"),
+      applied_at: appliedAt,
+      target_files: normalizeTargetFiles(targetFiles),
+    },
+  };
 }
 
 export function getMemoryProposalPaths(cwd, proposal) {
