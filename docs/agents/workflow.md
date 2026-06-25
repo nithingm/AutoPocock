@@ -62,6 +62,7 @@ The Umbrella CLI stages the workflow:
 - `pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json`: validate a claimed dispatch without invoking a provider
 - `pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --prepare-worktree`: prepare the local worktree directory for a claimed worktree dispatch, then print the Runner Plan
 - `pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --execute`: execute from the approved Loop Spec, persist Provider Run metadata plus stdout/stderr logs, and enforce runtime stop/escalation conditions
+- `pnpm ops run-mirror -- --run .ai/provider-runs/provider-run-id.json --issue 123`: dry-run a Provider Run update for a GitHub issue; add `--apply --update-existing` to refresh an existing marked Provider Run comment instead of posting a duplicate
 - `pnpm ops console -- --port 4173 --host 127.0.0.1`: launch the local workflow console UI over the same artifact and gate contracts the CLI uses
 
 ## GitHub Setup Requirements
@@ -172,6 +173,8 @@ Review and QA progression are now durable workflow transitions, not implicit hum
 - `--apply --update-existing` first searches existing target comments for the marker and edits the matching comment when present; if no match exists, it posts a new comment.
 - Full Scheduler Plans are blocked by default because they are too noisy for issue comments.
 - GitHub posting requires explicit `--apply`.
+
+`pnpm ops run-mirror` uses the same marked-comment update behavior for Provider Run metadata mirrored to GitHub issues.
 
 ## Scheduler Apply And Dispatch
 

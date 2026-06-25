@@ -118,7 +118,6 @@ Execution lanes:
 - Worktree directory layout and cleanup policy.
 - Docker image contract and mounted workspace layout.
 - How to infer advisory Conflict Surface from file paths and active PRs.
-- Whether provider-run mirroring should share the same marked-comment update path as artifact mirroring.
 - How to extend Dispatch Claim locking beyond local filesystem coordination for distributed runners.
 - How approved repo-local Durable Memory decisions should sync into external/user-level memory stores, if that becomes part of the product boundary.
 

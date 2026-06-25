@@ -12,7 +12,7 @@ import {
   markMemoryProposalApplied,
   writeMemoryProposalArtifact,
 } from "./lib/memory-proposals.mjs";
-import { buildMirrorComment, findMirroredComment, renderMirrorPlan } from "./lib/artifact-mirror.mjs";
+import { buildMirrorComment, findMirroredComment, mirrorCommentMarker, renderMirrorPlan } from "./lib/artifact-mirror.mjs";
 import { classifyFeedback, createFeedbackArtifactSuggestion, renderFeedbackClassification } from "./lib/feedback-classifier.mjs";
 import {
   approveContextArtifact,
@@ -278,7 +278,9 @@ function renderSchedulerMismatchGuidance({ issue, queuePath, shouldDispatch, mat
 }
 
 function renderProviderRunMirrorComment({ metadata, issueRef, providerRunPath }) {
+  const marker = mirrorCommentMarker({ artifactPath: providerRunPath, kind: "provider-run" });
   const lines = [
+    marker,
     `Provider Run update for \`${metadata.run_id}\``,
     "",
     `- Issue: ${issueRef}`,
@@ -308,6 +310,7 @@ function renderProviderRunMirrorComment({ metadata, issueRef, providerRunPath })
 
   return {
     target: `issue #${issueRef}`,
+    marker,
     body: lines.join("\n"),
   };
 }
@@ -2765,6 +2768,7 @@ async function runMirror(args) {
   const run = readOption(args, "run");
   const issue = readOption(args, "issue");
   const apply = args.includes("--apply");
+  const updateExisting = args.includes("--update-existing");
 
   if (!run) {
     throw new Error("run-mirror requires --run.");
@@ -2788,6 +2792,8 @@ async function runMirror(args) {
     `Mode: ${apply ? "apply" : "dry-run"}`,
     `Run: ${providerRunPath}`,
     `Target: ${comment.target}`,
+    `Mirror marker: ${comment.marker}`,
+    `Existing comment behavior: ${updateExisting ? "update matching provider-run comment when present" : "post a new comment"}`,
     "",
     "## Comment Body",
     "",
@@ -2808,6 +2814,15 @@ async function runMirror(args) {
   const auth = await commandAvailable("gh", ["auth", "status"]);
   if (!auth.available) {
     throw new Error("GitHub authentication is required for run-mirror -- --apply. Run `gh auth login` first.");
+  }
+
+  if (updateExisting) {
+    const existing = findMirroredComment(await listGitHubComments({ issue: issueRef }), comment.marker);
+    if (existing) {
+      await updateGitHubIssueComment(existing.id, comment.body);
+      process.stdout.write(`GitHub provider-run mirror comment updated: ${existing.url || existing.id}.\n`);
+      return;
+    }
   }
 
   await withTemporaryGhBody(comment.body, (bodyPath) =>

@@ -816,6 +816,51 @@ test("mirror --apply --update-existing edits a matching mirror comment", async (
   assert.doesNotMatch(ghLog, /issue comment 5 --body-file/);
 });
 
+test("run-mirror --apply --update-existing edits a matching provider-run mirror comment", async () => {
+  const cwd = await makeWorkspace();
+  const fakeGh = await installFakeGh(cwd);
+  const metadataPath = path.join(cwd, ".ai", "provider-runs", "provider-run-test.json");
+  await mkdir(path.dirname(metadataPath), { recursive: true });
+  await writeFile(
+    metadataPath,
+    `${JSON.stringify(
+      {
+        run_id: "provider-run-test",
+        provider: "codex",
+        adapter_mode: "live-detached",
+        dispatch_id: "dispatch-test",
+        issue_id: "23",
+        status: "blocked",
+        started_at: "2026-05-14T01:00:00.000Z",
+        completed_at: "2026-05-14T01:05:00.000Z",
+        completion_report_target: "docs/agents/completions/dispatch-test-completion.md",
+        result: {
+          summary: "Live Codex execution exceeded the timeout budget.",
+          follow_ups: ["Retry with a narrower prompt."],
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  const marker = mirrorCommentMarker({ artifactPath: metadataPath, kind: "provider-run" });
+
+  const result = await runOps(cwd, ["run-mirror", "--run", metadataPath, "--apply", "--update-existing"], {
+    env: {
+      ...fakeGh.env,
+      EXISTING_MIRROR_MARKER: marker,
+    },
+  });
+  const ghLog = await readFile(fakeGh.logPath, "utf8");
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /Existing comment behavior: update matching provider-run comment when present/);
+  assert.match(result.stdout, /GitHub provider-run mirror comment updated/);
+  assert.match(ghLog, /issue view 23 --json comments/);
+  assert.match(ghLog, /api graphql/);
+  assert.doesNotMatch(ghLog, /issue comment 23 --body-file/);
+});
+
 test("feedback prints a dry-run classification without mutating GitHub", async () => {
   const cwd = await makeWorkspace();
 
