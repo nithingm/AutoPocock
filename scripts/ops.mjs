@@ -59,7 +59,7 @@ import {
   defaultWaveApprovalArtifactPaths,
   renderWaveApprovalBundle,
 } from "./lib/wave-approval-plane.mjs";
-import { getProvider } from "./lib/providers/index.mjs";
+import { getProvider, listProviderDefinitions } from "./lib/providers/index.mjs";
 import {
   commandAvailable,
   ensureDirectories,
@@ -133,6 +133,7 @@ Usage:
   pnpm ops docker:clean -- --max-age-hours 24
   pnpm ops dispatch -- --issue 123 --title "Docker slice" --source manual --override-reason "Solo Operator approved" --isolation-mode docker --docker-env CODEX_HOME --docker-volume codex-cache:/codex-cache
   pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --execute
+  pnpm ops providers
   pnpm ops console -- --port 4173 --host 127.0.0.1
   pnpm ops run-status -- --run .ai/provider-runs/provider-run-id.json
   pnpm ops run-cancel -- --run .ai/provider-runs/provider-run-id.json --approved-by solo-operator --reason "No longer needed"
@@ -3846,6 +3847,96 @@ async function dockerPublishProvider(args) {
   process.stdout.write(`${lines.join("\n")}\n`);
 }
 
+async function providersCommand(args = []) {
+  const requireLogin = args.includes("--require-login");
+  const json = args.includes("--json");
+  const definitions = listProviderDefinitions();
+  const entries = [];
+
+  for (const definition of definitions) {
+    const provider = getProvider(definition.name, { commandAvailable, cwd });
+    const readiness = await provider.isAvailable({ requireLogin });
+    const capabilities = provider.getCapabilities ? provider.getCapabilities() : {};
+    entries.push({
+      name: definition.name,
+      aliases: definition.aliases,
+      command: definition.command,
+      credential_env: definition.credentialEnv,
+      availability: readiness,
+      capabilities,
+    });
+  }
+
+  const report = {
+    schema_version: "providers/v1",
+    require_login: requireLogin,
+    providers: entries,
+    extension_policy: {
+      summary: "Add a provider adapter only after the provider has a concrete CLI or API boundary.",
+      required_contract: [
+        "isAvailable",
+        "getCapabilities",
+        "renderPromptBundle",
+        "launchLoop",
+        "collectArtifacts",
+      ],
+    },
+  };
+
+  if (json) {
+    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    return;
+  }
+
+  const lines = [
+    "# Provider Inventory",
+    "",
+    `Login check: ${requireLogin ? "required" : "not required"}`,
+    "",
+  ];
+
+  for (const entry of entries) {
+    const availability = entry.availability || {};
+    const capabilityNames = Object.entries(entry.capabilities || {})
+      .filter(([, enabled]) => Boolean(enabled))
+      .map(([name]) => name);
+    lines.push(`## ${entry.name}`);
+    lines.push("");
+    lines.push(`- Aliases: ${entry.aliases.length > 0 ? entry.aliases.join(", ") : "none"}`);
+    lines.push(`- CLI command: ${entry.command}`);
+    lines.push(`- Credential env: ${entry.credential_env.length > 0 ? entry.credential_env.join(", ") : "none"}`);
+    lines.push(`- Available: ${availability.available ? "yes" : "no"}`);
+    lines.push(`- Ready: ${availability.ready ? "yes" : "no"}`);
+    lines.push(`- Authenticated: ${availability.authenticated ? "yes" : "no"}`);
+    lines.push(`- Source: ${availability.source || "unknown"}`);
+    const detail = providerDetailLine(availability.detail);
+    if (detail) {
+      lines.push(`- Detail: ${detail}`);
+    }
+    lines.push(`- Capabilities: ${capabilityNames.join(", ") || "none"}`);
+    lines.push("");
+  }
+
+  lines.push("## Extension Policy", "");
+  lines.push(`- ${report.extension_policy.summary}`);
+  lines.push(`- Required adapter contract: ${report.extension_policy.required_contract.join(", ")}`);
+
+  process.stdout.write(`${lines.join("\n")}\n`);
+}
+
+function providerDetailLine(detail) {
+  const text = String(detail || "").trim();
+  if (!text) {
+    return "";
+  }
+
+  const firstLine = text.split(/\r?\n/)[0].trim();
+  if (firstLine === "{") {
+    return "structured provider status output";
+  }
+  return firstLine;
+}
+
 function parseDockerInspectOutput(stdout) {
   const text = String(stdout || "").trim();
   if (!text) {
@@ -5131,6 +5222,11 @@ async function main() {
 
   if (command === "run-mirror") {
     await runMirror(args);
+    return;
+  }
+
+  if (command === "providers") {
+    await providersCommand(args);
     return;
   }
 

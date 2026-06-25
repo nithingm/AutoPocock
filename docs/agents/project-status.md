@@ -50,7 +50,7 @@ pnpm smoke:console
 Observed result:
 
 - `verify:project -- --strict-external` reports local readiness passed, GitHub Project read path passed, Project write scope present, and issue `#45` in a closed terminal state outside the active queue.
-- `setup` reports git, node, pnpm, GitHub CLI/auth, Codex provider readiness, Claude provider readiness, and workflow directories ready.
+- `setup` reports git, node, pnpm, GitHub CLI/auth, Codex provider readiness, Claude provider readiness, and workflow directories ready. `pnpm ops providers` is the direct provider inventory command for supported adapters, aliases, credential env hints, capabilities, and optional login readiness checks.
 - `gh auth status` reports account `nithingm` with Project access sufficient for the strict verifier.
 - `github:init` remains dry-run-first and reports existing label and Project field drift without mutating GitHub. The guarded `--apply --create-project` path now creates a fresh Project only when no Project reference is configured, and the explicit `--apply --create-project-fields` path created the missing configured optional Project fields on Project 1.
 - `github:init` now inspects the live GitHub GraphQL mutation schema for ProjectV2 view mutation capability. The latest live report says schema inspected, view mutations unavailable, and no matching mutations.
@@ -163,7 +163,7 @@ The core landing and tracker reconciliation are complete. Remaining work is prod
 1. GitHub Project view setup is inspectable through GraphQL, including missing-view/name-drift reports and live mutation-capability evidence. Creation and renaming remain manual while GitHub CLI/GraphQL expose no ProjectV2 view mutations, but `pnpm ops github:init -- --write-view-plan` now creates a durable Prepared Human Step with exact actions, verification guidance, and schema evidence.
 2. Package the GitHub ref distributed lock path beyond the landed scheduler dispatch policy, `claim-locks` text/JSON audit, orphan cleanup command, scheduled GitHub Actions audit, and Actions run-summary dashboard: external operator dashboards only if needed.
 3. Publish or deploy the repo-owned provider image where production runners can pull it. The local image `autopocock-provider-runner:local` is buildable and validated with pinned Codex and Claude Code CLIs, and `pnpm ops docker:publish-provider` now turns the remaining registry/tag plus credential-package decision into an explicit dry-run/apply command. Docker cleanup policy is implemented for stopped AutoPocock-managed containers; declared credential/cache volumes remain operator-owned and are intentionally not auto-deleted.
-4. Add more provider adapters only when a concrete provider boundary is needed beyond Codex and Claude Code.
+4. Add more provider adapters only when a concrete provider boundary is needed beyond Codex and Claude Code. Use `pnpm ops providers -- --json --require-login` as the current adapter inventory and readiness check.
 5. Run a live end-to-end validation after any follow-up changes:
    - `pnpm verify:project -- --strict-external`
    - `pnpm ops setup`

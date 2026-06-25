@@ -75,7 +75,7 @@ The current local implementation is organized around these planes:
 - Issue/DAG planning: compiles approved PRDs into issue DAGs with node metadata, dependencies, execution waves, quality gates, and regeneration support.
 - GitHub bridge: initializes tracker labels, exports project queue state, mirrors selected artifacts, and reconciles DAG work with GitHub issue/project state.
 - Scheduler and dispatch: creates scheduler plans, dispatch artifacts, claims, reclaim decisions, and runner-ready execution packages.
-- Provider execution: validates claimed dispatches, prepares worktrees, runs provider-neutral loop specs through Codex or Claude Code provider adapters, and records provider run evidence.
+- Provider execution: validates claimed dispatches, prepares worktrees, lists provider adapter readiness with `pnpm ops providers`, runs provider-neutral loop specs through Codex or Claude Code provider adapters, and records provider run evidence.
 - Ralph/graph progression: models wave approval, pause/freeze policy, bug-loop repair insertion, QA/review decisions, and dependency unlocking.
 - Review and QA: enforces Review Entry Gate, targeted QA, QA decisions, Same-PR Fix classification, and bug follow-up creation.
 - Workflow console: exposes setup, context, PRD, graph, execution, and review state through an artifact-first local UI.
@@ -107,7 +107,7 @@ pnpm smoke:console
 Observed:
 
 - `pnpm verify:project -- --strict-external` passes for local readiness, Project read path, Project write scope, and issue `#45` closed terminal state
-- local setup reports git, node, pnpm, GitHub CLI/auth, Codex provider readiness, Claude provider readiness, and workflow directories ready
+- local setup reports git, node, pnpm, GitHub CLI/auth, Codex provider readiness, Claude provider readiness, and workflow directories ready; `pnpm ops providers` exposes the direct provider inventory
 - `github:init -- --apply --create-project` is now a guarded fresh-setup path that refuses duplicate Project creation when a Project reference exists
 - `github:init -- --apply --create-project-fields` created the missing configured optional Project fields, while continuing to report existing drift without rewriting fields
 - `run -- --prepare-docker` exposes Docker image/workspace/network/env/volume isolation plans, and `run -- --execute --execute-docker` launches the rendered container command after explicit approval

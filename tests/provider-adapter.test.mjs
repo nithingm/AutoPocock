@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { createProviderRegistry, getProvider } from "../scripts/lib/providers/index.mjs";
+import { createProviderRegistry, getProvider, listProviderDefinitions } from "../scripts/lib/providers/index.mjs";
 import { createClaudeProvider } from "../scripts/lib/providers/claude-provider.mjs";
 import { createCodexProvider } from "../scripts/lib/providers/codex-provider.mjs";
 import { runClaudePrint } from "../scripts/lib/claude-exec.mjs";
@@ -48,6 +48,18 @@ test("provider registry exposes Codex and Claude Code adapters", () => {
     cwd: "d:\\Projects\\AutoPocock",
     commandAvailable: async () => ({ available: true, stdout: "", stderr: "" }),
   }).name, "claude");
+});
+
+test("provider definitions expose canonical commands and credential env hints", () => {
+  const definitions = listProviderDefinitions();
+
+  assert.deepEqual(
+    definitions.map((definition) => definition.name),
+    ["codex", "claude"],
+  );
+  assert.deepEqual(definitions[0].credentialEnv, ["CODEX_HOME"]);
+  assert.deepEqual(definitions[1].aliases, ["claude-code"]);
+  assert.deepEqual(definitions[1].credentialEnv, ["CLAUDE_CONFIG_DIR"]);
 });
 
 test("ClaudeProvider reports readiness through the shared provider contract", async () => {

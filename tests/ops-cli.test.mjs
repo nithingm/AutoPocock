@@ -141,6 +141,67 @@ exit /b 0
   };
 }
 
+async function installFakeProviders(cwd) {
+  const binDir = path.join(cwd, "provider-bin");
+  await mkdir(binDir, { recursive: true });
+  await writeFile(
+    path.join(binDir, "codex"),
+    `#!/usr/bin/env sh
+if [ "$1" = "--version" ]; then echo "codex-cli 9.9.9"; exit 0; fi
+if [ "$1" = "login" ] && [ "$2" = "status" ]; then echo "Logged in"; exit 0; fi
+echo "unexpected codex args: $*" >&2
+exit 1
+`,
+  );
+  await writeFile(
+    path.join(binDir, "claude"),
+    `#!/usr/bin/env sh
+if [ "$1" = "--version" ]; then echo "9.9.9 (Claude Code)"; exit 0; fi
+if [ "$1" = "auth" ] && [ "$2" = "status" ]; then echo "Authenticated"; exit 0; fi
+echo "unexpected claude args: $*" >&2
+exit 1
+`,
+  );
+  await chmod(path.join(binDir, "codex"), 0o755);
+  await chmod(path.join(binDir, "claude"), 0o755);
+  await writeFile(
+    path.join(binDir, "codex.cmd"),
+    `@echo off
+if "%1"=="--version" (
+  echo codex-cli 9.9.9
+  exit /b 0
+)
+if "%1"=="login" if "%2"=="status" (
+  echo Logged in
+  exit /b 0
+)
+echo unexpected codex args: %* 1>&2
+exit /b 1
+`,
+  );
+  await writeFile(
+    path.join(binDir, "claude.cmd"),
+    `@echo off
+if "%1"=="--version" (
+  echo 9.9.9 (Claude Code)
+  exit /b 0
+)
+if "%1"=="auth" if "%2"=="status" (
+  echo Authenticated
+  exit /b 0
+)
+echo unexpected claude args: %* 1>&2
+exit /b 1
+`,
+  );
+
+  return {
+    env: {
+      PATH: `${binDir}${path.delimiter}${process.env.PATH || ""}`,
+    },
+  };
+}
+
 test("docker:validate runs an image readiness probe with required commands and env", async () => {
   const cwd = await makeWorkspace();
   const fakeDocker = await installFakeDocker(cwd);
@@ -346,6 +407,31 @@ test("docker:publish-provider requires approval before applying tag and push", a
   assert.match(dockerLog, /run --rm --network none autopocock-provider-runner:test sh -lc/);
   assert.match(dockerLog, /tag autopocock-provider-runner:test ghcr\.io\/example\/autopocock-provider-runner:test/);
   assert.match(dockerLog, /push ghcr\.io\/example\/autopocock-provider-runner:test/);
+});
+
+test("providers prints canonical provider inventory with readiness and aliases", async () => {
+  const cwd = await makeWorkspace();
+  const fakeProviders = await installFakeProviders(cwd);
+
+  const result = await runOps(cwd, ["providers", "--json", "--require-login"], {
+    env: fakeProviders.env,
+  });
+
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.schema_version, "providers/v1");
+  assert.equal(report.require_login, true);
+  assert.deepEqual(
+    report.providers.map((provider) => provider.name),
+    ["codex", "claude"],
+  );
+  assert.deepEqual(report.providers[1].aliases, ["claude-code"]);
+  assert.deepEqual(report.providers[0].credential_env, ["CODEX_HOME"]);
+  assert.deepEqual(report.providers[1].credential_env, ["CLAUDE_CONFIG_DIR"]);
+  assert.equal(report.providers[0].availability.authenticated, true);
+  assert.equal(report.providers[1].availability.authenticated, true);
+  assert.equal(report.providers[0].capabilities.launch, true);
+  assert.match(report.extension_policy.summary, /concrete CLI or API boundary/);
 });
 
 test("github:export refuses to run without a project reference", async () => {

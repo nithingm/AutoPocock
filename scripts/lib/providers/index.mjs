@@ -3,6 +3,21 @@ import { createClaudeProvider } from "./claude-provider.mjs";
 
 export const CANONICAL_PROVIDER_NAMES = ["codex", "claude"];
 
+export const PROVIDER_DEFINITIONS = [
+  {
+    name: "codex",
+    aliases: [],
+    command: "codex",
+    credentialEnv: ["CODEX_HOME"],
+  },
+  {
+    name: "claude",
+    aliases: ["claude-code"],
+    command: "claude",
+    credentialEnv: ["CLAUDE_CONFIG_DIR"],
+  },
+];
+
 export function createProviderRegistry({ commandAvailable, cwd }) {
   return {
     codex: createCodexProvider({ commandAvailable, cwd }),
@@ -13,6 +28,14 @@ export function createProviderRegistry({ commandAvailable, cwd }) {
 
 export function listCanonicalProviderNames() {
   return [...CANONICAL_PROVIDER_NAMES];
+}
+
+export function listProviderDefinitions() {
+  return PROVIDER_DEFINITIONS.map((definition) => ({
+    ...definition,
+    aliases: [...definition.aliases],
+    credentialEnv: [...definition.credentialEnv],
+  }));
 }
 
 export function getProvider(name, { commandAvailable, cwd }) {

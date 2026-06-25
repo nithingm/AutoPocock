@@ -84,6 +84,7 @@ The Umbrella CLI stages the workflow:
 - `pnpm ops docker:clean -- --max-age-hours 24`: preview stale stopped AutoPocock-managed Docker containers; add `--apply` to remove only the listed managed containers
 - `pnpm ops dispatch -- --isolation-mode docker --docker-env CODEX_HOME --docker-volume codex-cache:/codex-cache ...`: declare allowed credential env vars and extra writable mounts explicitly for Docker dispatches
 - `pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --execute`: execute from the approved Loop Spec, persist Provider Run metadata plus stdout/stderr logs, and enforce runtime stop/escalation conditions
+- `pnpm ops providers`: list supported provider adapters, aliases, required CLI commands, credential env hints, capabilities, and readiness; add `--require-login` when checking live execution readiness, or `--json` for automation
 - `pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --execute --live-provider --provider claude`: run the same provider-neutral Loop Spec through the Claude Code adapter instead of the default Codex adapter
 - `pnpm ops worktree-clean -- --max-age-hours 168`: preview stale unreferenced `.worktrees` cleanup; add `--apply` to delete only the listed unreferenced directories
 - `pnpm ops run-mirror -- --run .ai/provider-runs/provider-run-id.json --issue 123`: dry-run a Provider Run update for a GitHub issue; add `--apply --update-existing` to refresh an existing marked Provider Run comment instead of posting a duplicate
@@ -238,6 +239,7 @@ To make the whole flow work end-to-end as the Solo Operator:
 - Use `pnpm ops reclaim` only when you have decided the old claim should be abandoned; the reclaim command records that approval locally. Add `--apply-tracker` when a tracker-visible runner lease should be cleared from the Project item, and `--apply-lock-ref` when a GitHub distributed lock ref should be released.
 - Use `pnpm ops reclaim-expired` as the dry-run-first batch path for expired leases. It requires `--apply --approved-by --reason` before returning dispatches to `queued`; add `--apply-lock-ref` to release recorded distributed lock refs during batch recovery.
 - Use `pnpm ops run` as the final local validation step before any future provider execution layer.
+- Use `pnpm ops providers -- --require-login` before live provider runs when you need to confirm Codex and Claude Code command/auth readiness, aliases, and credential env hints.
 - Use `pnpm ops qa` and `pnpm ops feedback` after implementation so QA context and bug-vs-same-PR decisions are explicit.
 
 ## Slice Completion Rules
