@@ -135,8 +135,7 @@ The core landing and tracker reconciliation are complete. Remaining work is prod
 1. Automate GitHub Project views beyond report-first bootstrap.
 2. Wire provider execution inside the prepared Docker container boundary before high-concurrency AFK execution.
 3. Replace tracker-visible claim leases with true distributed compare-and-swap locking and lease expiry for multiple runners.
-4. Decide whether approved repo-local memory decisions should sync into external/user-level memory stores.
-5. Re-run full local tests plus strict live tracker verification after any follow-up updates.
+4. Re-run full local tests plus strict live tracker verification after any follow-up updates.
 
 ## Continuation Brief
 

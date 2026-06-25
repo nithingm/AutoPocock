@@ -119,7 +119,7 @@ Execution lanes:
 - Additional provider adapters beyond Codex and Claude Code, if the product boundary expands to more CLIs or hosted runners.
 - Containerized provider launch, host credential policy, and writable workspace lifecycle for Docker-isolated runs.
 - How to extend tracker-visible claim leases into true distributed compare-and-swap locking and lease expiry for multiple runners.
-- How approved repo-local Durable Memory decisions should sync into external/user-level memory stores, if that becomes part of the product boundary.
+- External/user-level memory sync is intentionally outside the current product boundary; approved Durable Memory decisions stay repo-local unless a future explicit connector boundary is designed and approved.
 
 ## Locked GitHub Bootstrap Decisions
 

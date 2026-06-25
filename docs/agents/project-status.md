@@ -160,9 +160,8 @@ The core landing and tracker reconciliation are complete. Remaining work is prod
 1. Automate GitHub Project view setup beyond the current report-first bootstrap contract.
 2. Wire provider execution inside the prepared Docker container boundary before high-concurrency AFK execution.
 3. Replace tracker-visible claim leases with true distributed compare-and-swap locking and lease expiry for multiple runners.
-4. Decide whether approved repo-local Durable Memory decisions should sync into external/user-level memory stores.
-5. Add more provider adapters only when a concrete provider boundary is needed beyond Codex and Claude Code.
-6. Run a live end-to-end validation after any follow-up changes:
+4. Add more provider adapters only when a concrete provider boundary is needed beyond Codex and Claude Code.
+5. Run a live end-to-end validation after any follow-up changes:
    - `pnpm verify:project -- --strict-external`
    - `pnpm ops setup`
    - `pnpm ops github:export -- --issue <target>`

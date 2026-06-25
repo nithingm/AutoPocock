@@ -157,7 +157,7 @@ Review and QA progression are now durable workflow transitions, not implicit hum
 - `pnpm ops memory-decision -- --proposal <proposal.json> --decision reject --approved-by <operator> --reason "<reason>"` records rejection and leaves target files unchanged.
 - `pnpm ops memory-decision -- --proposal <proposal.json> --decision approve --approved-by <operator> --reason "<reason>" --apply` approves and appends the proposal text to each repo target file with an idempotent `memory-proposal` marker.
 - `pnpm ops memory-decision -- --proposal <approved-proposal.json> --approved-by <operator> --apply` applies an already approved proposal.
-- The apply path edits only repo target files named by the proposal. It does not mutate external Codex memory or any user-level memory store.
+- The apply path edits only repo target files named by the proposal. It does not mutate external Codex memory or any user-level memory store. This is an accepted product boundary in `docs/adr/2026-06-25-repo-local-durable-memory.md`.
 
 ## Targeted QA
 
