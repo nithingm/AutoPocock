@@ -31,7 +31,7 @@ pnpm test
 
 Observed result:
 
-- 196 tests passed
+- 197 tests passed
 - 0 tests failed
 
 This proves the current local source tree is internally coherent.
@@ -66,7 +66,7 @@ Current branch:
 - latest commits include the PR `#56` merge and post-merge status/verifier updates
 - merged PR: `https://github.com/nithingm/AutoPocock/pull/56`
 
-The landed baseline includes the manual OS, original GitHub-backed workflow hardening, automation-layer implementation, artifact and Provider Run mirror update/dedup behavior, durable memory proposal decision/apply flow, tests, CI workflow, and durable status/orientation artifacts.
+The landed baseline includes the manual OS, original GitHub-backed workflow hardening, automation-layer implementation, opt-in scheduler conflict inference, artifact and Provider Run mirror update/dedup behavior, durable memory proposal decision/apply flow, tests, CI workflow, and durable status/orientation artifacts.
 
 Landed source/test/docs include:
 

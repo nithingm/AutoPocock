@@ -274,6 +274,7 @@ test("github:export preserves scheduler fields from alternate top-level item sha
             risk: "low",
             dependency: "",
             "conflict Surface": "low",
+            "write Surface": ["scripts/**", "tests/**"],
             "feature Track": "github-export",
             "dispatch ID": "",
           },
@@ -297,6 +298,7 @@ test("github:export preserves scheduler fields from alternate top-level item sha
   assert.equal(queue[0].risk, "low");
   assert.equal(queue[0].dependency, "");
   assert.equal(queue[0].conflictSurface, "low");
+  assert.deepEqual(queue[0].writeSurface, ["scripts/**", "tests/**"]);
   assert.equal(queue[0].featureTrack, "github-export");
   assert.deepEqual(queue[0].labels, ["ready-for-agent", "enhancement"]);
 });
@@ -1247,6 +1249,76 @@ test("schedule --dispatch reports when no dispatch artifacts are created", async
   assert.equal(result.code, 0);
   assert.match(result.stdout, /No dispatch artifacts were created\./);
   assert.equal(dispatchEntries.length, 0);
+});
+
+test("schedule --infer-conflicts skips queue items whose write surface overlaps active PR files", async () => {
+  const cwd = await makeWorkspace({
+    root: {
+      schedulerDefaults: {
+        reviewCapacity: 2,
+      },
+    },
+  });
+  const activePrsPath = path.join(cwd, "active-prs.json");
+  await writeFile(
+    activePrsPath,
+    `${JSON.stringify(
+      [
+        {
+          number: 77,
+          title: "Touch scheduler code",
+          files: [{ path: "scripts/ops.mjs" }],
+        },
+      ],
+      null,
+      2,
+    )}\n`,
+  );
+  await writeFile(
+    path.join(cwd, ".ai", "queue.json"),
+    `${JSON.stringify(
+      [
+        {
+          id: "ISSUE-10",
+          title: "Scheduler-adjacent work",
+          labels: ["enhancement", "ready-for-agent"],
+          stage: "Ready for Handoff",
+          queueClass: "tracer-bullet",
+          risk: "low",
+          dependency: "unblocked",
+          conflictSurface: "low",
+          writeSurface: ["scripts/**"],
+        },
+        {
+          id: "ISSUE-11",
+          title: "Docs-only work",
+          labels: ["enhancement", "ready-for-agent"],
+          stage: "Ready for Handoff",
+          queueClass: "tracer-bullet",
+          risk: "low",
+          dependency: "unblocked",
+          conflictSurface: "low",
+          writeSurface: ["docs/**"],
+        },
+      ],
+      null,
+      2,
+    )}\n`,
+  );
+
+  const result = await runOps(cwd, [
+    "schedule",
+    "--queue",
+    ".ai/queue.json",
+    "--infer-conflicts",
+    "--active-prs-input",
+    activePrsPath,
+  ]);
+
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Conflict inference: enabled/);
+  assert.match(result.stdout, /SKIP: ISSUE-10 Scheduler-adjacent work - inferred high conflict surface from active PR #77: scripts\/ops\.mjs overlaps scripts\/\*\*/);
+  assert.match(result.stdout, /DISPATCH: ISSUE-11 Docs-only work - fits scheduler plan/);
 });
 
 test("manual dispatch auto-resolves only an exact handoff match for the requested issue", async () => {

@@ -90,7 +90,7 @@ pnpm test
 
 Observed:
 
-- 196 tests passed
+- 197 tests passed
 - 0 tests failed
 
 Latest readiness checks recorded there:

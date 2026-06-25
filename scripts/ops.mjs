@@ -98,6 +98,7 @@ Usage:
   pnpm ops qa
   pnpm ops board
   pnpm ops schedule -- --queue .ai/queue.example.json
+  pnpm ops schedule -- --queue .ai/queue.json --infer-conflicts
   pnpm ops schedule -- --queue .ai/queue.json --apply
   pnpm ops schedule -- --queue .ai/queue.json --dispatch
   pnpm ops github:init
@@ -1522,6 +1523,7 @@ function normalizeProjectItem(item) {
     risk: fieldValue(fields, "Risk") || flatItemValue(item, "risk"),
     dependency: fieldValue(fields, "Dependency") || flatItemValue(item, "dependency"),
     conflictSurface: fieldValue(fields, "Conflict Surface") || flatItemValue(item, "conflict Surface"),
+    writeSurface: normalizeWriteSurface(fieldValue(fields, "Write Surface") || flatItemValue(item, "write Surface")),
     dispatchId: fieldValue(fields, "Dispatch ID") || flatItemValue(item, "dispatch ID"),
     prLinks: content.pullRequest?.url ? [content.pullRequest.url] : [],
     updatedAt: content.updatedAt || item.updatedAt || "",
@@ -1873,6 +1875,83 @@ function riskCost(risk, defaults) {
   return cost === "approval-required" ? Infinity : cost;
 }
 
+function normalizeWriteSurface(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || "").replace(/\\/g, "/").trim()).filter(Boolean);
+  }
+
+  if (!value) {
+    return [];
+  }
+
+  return String(value)
+    .split("|")
+    .map((item) => item.replace(/\\/g, "/").trim())
+    .filter(Boolean);
+}
+
+function globToRegExp(glob) {
+  const escaped = String(glob || "")
+    .replace(/\\/g, "/")
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*\*/g, "__AUTOPOCOCK_GLOBSTAR__")
+    .replace(/\*/g, "[^/]*");
+  return new RegExp(`^${escaped.replace(/__AUTOPOCOCK_GLOBSTAR__/g, ".*")}$`);
+}
+
+function writeSurfaceMatchesPath(surface, changedPath) {
+  const normalizedSurface = String(surface || "").replace(/\\/g, "/").trim();
+  const normalizedPath = String(changedPath || "").replace(/\\/g, "/").trim();
+  if (!normalizedSurface || !normalizedPath) {
+    return false;
+  }
+
+  if (["*", "**", "**/*"].includes(normalizedSurface)) {
+    return true;
+  }
+
+  if (normalizedSurface.endsWith("/**")) {
+    const prefix = normalizedSurface.slice(0, -3);
+    return normalizedPath === prefix || normalizedPath.startsWith(`${prefix}/`);
+  }
+
+  if (normalizedSurface.includes("*")) {
+    return globToRegExp(normalizedSurface).test(normalizedPath);
+  }
+
+  return normalizedPath === normalizedSurface || normalizedPath.startsWith(`${normalizedSurface}/`);
+}
+
+function activePrFilePath(file) {
+  return typeof file === "string" ? file : file?.path || file?.filename || file?.name || "";
+}
+
+function inferQueueItemConflict(item, conflictInference) {
+  if (!conflictInference?.enabled) {
+    return null;
+  }
+
+  const writeSurface = normalizeWriteSurface(item.writeSurface || item.write_surface || item.changedFiles || item.changed_files);
+  if (writeSurface.length === 0) {
+    return null;
+  }
+
+  for (const pullRequest of conflictInference.pullRequests) {
+    for (const file of pullRequest.files || []) {
+      const changedPath = activePrFilePath(file);
+      const matchedSurface = writeSurface.find((surface) => writeSurfaceMatchesPath(surface, changedPath));
+      if (matchedSurface) {
+        return {
+          surface: "high",
+          reason: `inferred high conflict surface from active PR #${pullRequest.number || "unknown"}: ${changedPath} overlaps ${matchedSurface}`,
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
 function evaluateQueueItem(item, context) {
   const defaults = context.config.schedulerDefaults || {};
 
@@ -1906,6 +1985,11 @@ function evaluateQueueItem(item, context) {
     return { action: "skip", reason: "high conflict surface requires Solo Operator approval" };
   }
 
+  const inferredConflict = inferQueueItemConflict(item, context.conflictInference);
+  if (inferredConflict?.surface === "high") {
+    return { action: "skip", reason: inferredConflict.reason, inferredConflict };
+  }
+
   if (item.queueClass === "routine-afk" && !item.tracerBulletDone) {
     return { action: "skip", reason: "feature track tracer bullet is not done" };
   }
@@ -1917,6 +2001,64 @@ function evaluateQueueItem(item, context) {
 
   context.remainingCapacity -= cost;
   return { action: "dispatch", reason: `fits scheduler plan; consumes ${cost} review capacity` };
+}
+
+function normalizeActivePullRequests(value) {
+  const pullRequests = Array.isArray(value) ? value : value?.pullRequests || value?.pull_requests || [];
+  return pullRequests.map((pullRequest) => ({
+    number: pullRequest.number || pullRequest.id || "",
+    title: pullRequest.title || "",
+    files: Array.isArray(pullRequest.files) ? pullRequest.files : [],
+  }));
+}
+
+async function loadActivePullRequestsFromGitHub() {
+  const ghVersion = await commandAvailable("gh");
+  if (!ghVersion.available) {
+    throw new Error("gh CLI is required for schedule -- --infer-conflicts without --active-prs-input. Install it from https://cli.github.com/.");
+  }
+
+  const auth = await commandAvailable("gh", ["auth", "status"]);
+  if (!auth.available) {
+    throw new Error("GitHub authentication is required for schedule -- --infer-conflicts. Run `gh auth login` first.");
+  }
+
+  const listResult = await runGh(["pr", "list", "--state", "open", "--json", "number,title"]);
+  const listed = JSON.parse(listResult.stdout || "[]");
+  const pullRequests = [];
+  for (const pullRequest of listed) {
+    const viewResult = await runGh(["pr", "view", String(pullRequest.number), "--json", "files"]);
+    const view = JSON.parse(viewResult.stdout || "{}");
+    pullRequests.push({
+      number: pullRequest.number,
+      title: pullRequest.title || "",
+      files: Array.isArray(view.files) ? view.files : [],
+    });
+  }
+  return pullRequests;
+}
+
+async function createConflictInferenceContext(args) {
+  if (!args.includes("--infer-conflicts")) {
+    return { enabled: false, pullRequests: [], source: "disabled" };
+  }
+
+  const activePrsInput = readOption(args, "active-prs-input");
+  if (activePrsInput) {
+    const inputPath = path.isAbsolute(activePrsInput) ? activePrsInput : path.join(cwd, activePrsInput);
+    const parsed = JSON.parse(await readFile(inputPath, "utf8"));
+    return {
+      enabled: true,
+      pullRequests: normalizeActivePullRequests(parsed),
+      source: activePrsInput,
+    };
+  }
+
+  return {
+    enabled: true,
+    pullRequests: await loadActivePullRequestsFromGitHub(),
+    source: "github-open-prs",
+  };
 }
 
 async function schedule(args) {
@@ -1934,7 +2076,8 @@ async function schedule(args) {
 
   const queue = await loadJson(queuePath);
   const reviewCapacity = Number.parseInt(capacityOverride || config.schedulerDefaults?.reviewCapacity || "1", 10);
-  const context = { config, remainingCapacity: reviewCapacity };
+  const conflictInference = await createConflictInferenceContext(args);
+  const context = { config, remainingCapacity: reviewCapacity, conflictInference };
   const bugLoop = queue.filter((item) => item.stage === "Bug Loop");
   const candidates = queue.filter((item) => item.stage !== "Bug Loop");
   const ordered = config.schedulerDefaults?.bugLoopBeforeNewAfk ? [...bugLoop, ...candidates] : queue;
@@ -1947,6 +2090,7 @@ async function schedule(args) {
     `Review capacity: ${reviewCapacity}`,
     `Dispatch mode: ${shouldDispatch ? "enabled" : "dry-run only"}`,
     `Tracker apply mode: ${shouldApply ? "enabled" : "dry-run only"}`,
+    `Conflict inference: ${conflictInference.enabled ? `enabled (${conflictInference.source}, ${conflictInference.pullRequests.length} active PR(s))` : "disabled"}`,
     "",
     "## Decisions",
     "",

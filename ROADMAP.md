@@ -64,7 +64,7 @@ Execution lanes:
 - `pnpm ops schedule -- --dispatch` converts `DISPATCH` decisions into local Dispatch Artifacts.
 - Review Capacity defaults to config and can be overridden per run.
 - Bug Loop work consumes capacity before new AFK dispatch.
-- Conflict Surface is manually declared first, with optional CLI estimation later.
+- Conflict Surface is manually declared first, with opt-in CLI inference from queue write surfaces and active PR files.
 - Initial dispatch creates Dispatch Artifacts instead of calling subagents.
 - Dispatch Artifacts are JSON canonical plus markdown mirror.
 - Dispatch Claims use local filesystem locks around claim/reclaim mutations; distributed runner coordination remains a future hardening layer.
@@ -117,7 +117,6 @@ Execution lanes:
 - Runner interface shape for Codex, Claude Code, and other providers.
 - Worktree directory layout and cleanup policy.
 - Docker image contract and mounted workspace layout.
-- How to infer advisory Conflict Surface from file paths and active PRs.
 - How to extend Dispatch Claim locking beyond local filesystem coordination for distributed runners.
 - How approved repo-local Durable Memory decisions should sync into external/user-level memory stores, if that becomes part of the product boundary.
 

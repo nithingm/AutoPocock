@@ -71,6 +71,7 @@ The Concurrency Scheduler should use five simple signals:
 - Only `ready-for-agent` issues in `Ready for Handoff` may enter AFK execution.
 - A task that lacks the strict handoff gate remains a HITL task.
 - The scheduler limits concurrent AFK work based on risk, review capacity, dependency status, and conflict surface.
+- With `schedule -- --infer-conflicts`, the scheduler can also raise conflict risk for a run when queue item write surfaces overlap files changed by open PRs.
 - High-risk or high-conflict issues require Solo Operator approval before dispatch.
 - HITL tasks block only dependent work, unless they block the tracer bullet for a feature track.
 - Non-dependent AFK slices may proceed when tracer-bullet coverage for their feature track is complete.

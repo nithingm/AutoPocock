@@ -55,6 +55,7 @@ The Umbrella CLI stages the workflow:
 - `pnpm ops qa`: generate generic QA from recent commits
 - `pnpm ops board`: print the board, lane, and scheduler contract
 - `pnpm ops schedule -- --queue .ai/queue.example.json`: print a dry-run Scheduler Plan
+- `pnpm ops schedule -- --queue .ai/queue.json --infer-conflicts`: use queue item write surfaces and active PR file paths to infer high-conflict overlaps before dispatch
 - `pnpm ops schedule -- --queue .ai/queue.json --apply`: update GitHub Project fields for selected `DISPATCH` decisions without creating dispatch artifacts
 - `pnpm ops schedule -- --queue .ai/queue.example.json --dispatch`: create dispatch artifacts for `DISPATCH` decisions in the generated Scheduler Plan
 - `pnpm ops github:init`: print a dry-run GitHub Tracker Bootstrap report
@@ -182,6 +183,8 @@ Review and QA progression are now durable workflow transitions, not implicit hum
 
 - It writes a Scheduler Plan before doing anything else.
 - Without `--apply` or `--dispatch`, it does not mutate GitHub or create dispatch artifacts.
+- `--infer-conflicts` is advisory and opt-in. It compares queue item `writeSurface`/`write_surface` entries against changed files from open PRs, or from `--active-prs-input <json>` for fixture-backed/offline checks.
+- Inferred overlap is treated as high conflict for that run and skips the item with an explicit active-PR/file/path reason.
 - `--apply` updates GitHub Project fields only for items that resolved to `DISPATCH`: `Execution Stage = AFK In Progress`, `Execution Lane = Execution`, and `Last Scheduler Plan` when that optional field exists.
 - `--apply` requires queue items with GitHub Project item IDs, so use `pnpm ops github:export` for the queue snapshot before applying live scheduler state.
 
