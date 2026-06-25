@@ -3,15 +3,15 @@
 Date: 2026-06-25
 Repo: `D:\Projects\AutoPocock`
 
-This inventory explains what was committed to PR `#56` and what remains as intentionally unstaged scratch/demo output so the Solo Operator or a follow-on agent can avoid confusing source changes, durable Workflow Artifacts, and runtime records.
+This inventory explains what was landed through PR `#56` and what remains as intentionally unstaged scratch/demo output so the Solo Operator or a follow-on agent can avoid confusing source changes, durable Workflow Artifacts, and runtime records.
 
 ## Current Snapshot
 
 Branch state:
 
-- `codex/land-automation-layer`
-- pushed to `origin/codex/land-automation-layer`
-- PR `#56`: `https://github.com/nithingm/AutoPocock/pull/56`
+- `main`
+- aligned with `origin/main`
+- PR `#56` merged: `https://github.com/nithingm/AutoPocock/pull/56`
 - local working tree still has untracked scratch/demo artifacts outside the PR
 
 External tracker state:
@@ -42,7 +42,7 @@ Observed:
 
 ## Committed Review Surface
 
-PR `#56` contains the current manual-OS hardening, automation layer, tests, and durable orientation artifacts:
+PR `#56` landed the current manual-OS hardening, automation layer, tests, and durable orientation artifacts:
 
 - `.ai/ops.config.json`
 - `.gitignore`
@@ -108,7 +108,7 @@ The implementation modules are the bulk of the automation layer:
 Review meaning:
 
 - These should be reviewed as real source code, not generated evidence.
-- They are covered by the full test suite, local strict verification, and GitHub Actions CI, but they are not landed on `origin/main`.
+- They are covered by the full test suite, local strict verification, and GitHub Actions CI, and they are landed on `origin/main`.
 - `runtime-host.mjs` contains the Windows command-shim fix that makes `pnpm ops setup` correctly detect `pnpm` and `codex` on this machine.
 
 ## Test Modules In PR `#56`
@@ -155,7 +155,7 @@ These artifacts were promoted as durable project evidence or workflow history:
 
 Review meaning:
 
-- PR `#56` includes artifacts that explain durable decisions, evidence, or handoffs.
+- PR `#56` landed artifacts that explain durable decisions, evidence, or handoffs.
 - Generated examples such as `feature-name`, `my-feature`, issue `123`, and local placeholder contexts were left untracked. They may be useful fixtures or may be noise.
 - Dispatch and scheduler artifacts are often useful audit evidence, but they can become clutter if they are only transient run output.
 
@@ -312,4 +312,4 @@ Likely files:
 - Run `pnpm verify:project -- --strict-external` after each slice when the external checks should be reported with the local readiness state.
 - Re-run `pnpm ops github:export -- --issue 45` after tracker-affecting changes.
 - Run `pnpm smoke:console` after console or artifact-loading changes.
-- Keep PR `#56` as the review surface, and do not call the automation layer landed until the PR is accepted and merged.
+- Treat PR `#56` as the landed review surface for the automation layer.

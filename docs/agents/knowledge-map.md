@@ -9,7 +9,7 @@ This is the operator-facing map of where the project's knowledge lives and how t
 
 AutoPocock is no longer just a manual repo template. The accepted manual operating system is present, documented, and test-backed in the current working tree. On top of that, the local tree now contains a broader provider/DAG/Ralph orchestration layer with test coverage.
 
-The automation layer is now on review branch `codex/land-automation-layer` under PR `#56`. It is committed, pushed, ready for review, CI-backed, and reconciled far enough for Project visibility, but it is not landed on `origin/main` until the PR is accepted and merged.
+The automation layer is now landed on `origin/main` through PR `#56`. It is committed, merged, CI-backed, and reconciled far enough for Project visibility.
 
 ## Read These First
 
@@ -44,7 +44,7 @@ The automation layer is now on review branch `codex/land-automation-layer` under
 `docs/agents/project-status.md` is the current operating read. It separates:
 
 - landed `origin/main`
-- committed review-branch source/test/docs work
+- landed automation-layer source/test/docs work
 - live GitHub Issues and Project board state
 
 Use it before deciding whether to continue implementation, review local changes, reconcile tracker state, or prepare a PR.
@@ -115,8 +115,7 @@ Observed:
 
 ## Trust Rules
 
-- Use `origin/main` when you need the stable, landed manual OS baseline.
-- Use branch `codex/land-automation-layer` / PR `#56` when continuing provider/DAG/Ralph orchestration work.
+- Use `origin/main` when you need the stable, landed manual OS baseline or the provider/DAG/Ralph orchestration work.
 - Use GitHub Issues for live issue existence, ownership, and eventual stage movement.
 - Do not use the GitHub Project board as the sole source of truth for implementation completeness; use it for restored tracker visibility.
 - Do not close `#45` through `#55` based only on local completion reports. Review the corresponding source/test/docs evidence first.
@@ -127,11 +126,9 @@ Observed:
 
 The work left is mostly operational hardening and reconciliation:
 
-1. Review PR `#56`.
-2. Decide whether intentionally unstaged scratch/demo artifacts should be deleted, ignored, or promoted separately.
-3. Re-run full local tests plus strict live tracker verification after any review updates.
-4. Move issue state only after reviewed evidence supports each transition.
-5. Merge PR `#56` when accepted.
+1. Decide whether intentionally unstaged scratch/demo artifacts should be deleted, ignored, or promoted separately.
+2. Re-run full local tests plus strict live tracker verification after any follow-up updates.
+3. Move issue state only after landed evidence supports each transition.
 
 ## Continuation Brief
 

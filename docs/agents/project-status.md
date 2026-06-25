@@ -3,16 +3,15 @@
 Date: 2026-06-25
 Repo: `D:\Projects\AutoPocock`
 
-This artifact records the current working state of AutoPocock as a durable handoff for the Solo Operator. It separates four things that are easy to conflate:
+This artifact records the current working state of AutoPocock as a durable handoff for the Solo Operator. It separates three things that are easy to conflate:
 
 - what is landed on `origin/main`
-- what is committed on the review branch
 - what remains as local scratch/demo output
 - what the live GitHub tracker and Project board currently know
 
 For a map of where the project's durable language, command contracts, evidence artifacts, and continuation guidance live, use `docs/agents/knowledge-map.md`.
 
-For a reviewable inventory of the committed automation layer and intentionally unstaged scratch artifacts, use `docs/agents/local-change-inventory.md`.
+For a reviewable inventory of the landed automation layer and intentionally unstaged scratch artifacts, use `docs/agents/local-change-inventory.md`.
 
 For the explicit completion audit against the active objective, use `docs/agents/completion-audit-2026-06-25.md`.
 
@@ -20,9 +19,7 @@ For the explicit completion audit against the active objective, use `docs/agents
 
 AutoPocock has crossed from a manual agentic repo template into a local, test-backed prototype of a provider-agnostic AI engineering operating system.
 
-The committed baseline on `origin/main` proves the manual OS: PRD creation, issue decomposition, handoff artifacts, GitHub bootstrap/export, scheduling, dispatch artifacts, claiming, runner preparation, completion reports, review prep, targeted QA, feedback classification, and manual workflow documentation.
-
-The review branch goes further. PR `#56` contains implementation and tests for setup/context/PRD planes, layered DAG planning, DAG regeneration, DAG-to-GitHub sync and reconciliation, DAG quality gates, provider-neutral loop specs, wave approval, preflight validation, graph progression, repair insertion, Ralph pause/freeze policy, provider runs, a Codex provider adapter, and an artifact-first workflow console.
+The committed baseline on `origin/main` now includes the manual OS and the provider/DAG/Ralph automation layer: PRD creation, issue decomposition, handoff artifacts, GitHub bootstrap/export, scheduling, dispatch artifacts, claiming, runner preparation, completion reports, review prep, targeted QA, feedback classification, setup/context/PRD planes, layered DAG planning, DAG regeneration, DAG-to-GitHub sync and reconciliation, DAG quality gates, provider-neutral loop specs, wave approval, preflight validation, graph progression, repair insertion, Ralph pause/freeze policy, provider runs, a Codex provider adapter, and an artifact-first workflow console.
 
 ## Verification Snapshot
 
@@ -60,27 +57,20 @@ Observed result:
 - the workflow console starts on an ephemeral local port, serves `/`, returns `/api/state`, and closes cleanly.
 - GitHub Actions CI on PR `#56` runs `pnpm install --frozen-lockfile`, `pnpm test`, and `pnpm smoke:console`; the latest run is green.
 
-## Landed Baseline
+## Landed State
 
-Stable baseline:
+Current branch:
 
 - `main`
 - aligned with `origin/main`
-- latest commit: `3c038eb Document and verify manual ops workflow`
+- latest commit: `06ac64c Land automation workflow layer`
+- merged PR: `https://github.com/nithingm/AutoPocock/pull/56`
 
-The landed baseline includes the manual OS and the original GitHub-backed workflow hardening.
+The landed baseline includes the manual OS, original GitHub-backed workflow hardening, automation-layer implementation, tests, CI workflow, and durable status/orientation artifacts.
 
-Review branch:
+Landed source/test/docs include:
 
-- `codex/land-automation-layer`
-- pushed to `origin/codex/land-automation-layer`
-- PR: `https://github.com/nithingm/AutoPocock/pull/56`
-- latest commits add the automation layer, CI workflow, cross-platform test fixes, and this status refresh
-- PR status: ready for review, mergeable, CI green
-
-The review branch contains:
-
-- workflow command wiring and verification scripts
+- workflow command wiring, CI, and verification scripts
 - provider execution modules
 - runtime host modules
 - context and PRD plane modules
@@ -120,7 +110,7 @@ Live GitHub Issues currently show:
 
 - 43 closed issues
 - 12 open issues
-- PR `#56` open and ready for review for the automation layer
+- PR `#56` merged for the automation layer
 
 The open issues are `#44` through `#55`:
 
@@ -159,24 +149,20 @@ The local Ralph run state is stale: it still records `#45` as `in_progress` and 
 
 ## Remaining Work
 
-The next work is review and merge discipline, not broad feature invention.
+The next work is post-merge tracker discipline, not broad feature invention.
 
-1. Review PR `#56`.
-2. Decide whether any intentionally unstaged scratch/demo artifacts should be deleted, ignored, or promoted in a later artifact-only PR.
-3. Update issue states only after the corresponding PR evidence is reviewed.
-4. Run a live end-to-end validation before merge:
+1. Decide whether any intentionally unstaged scratch/demo artifacts should be deleted, ignored, or promoted in a later artifact-only PR.
+2. Update issue states only after the corresponding landed evidence is reviewed.
+3. Run a live end-to-end validation before moving issue states:
    - `pnpm verify:project -- --strict-external`
    - `pnpm ops setup`
    - `pnpm ops github:export -- --issue <target>`
    - scheduler or graph wave preview
    - `pnpm smoke:console`
    - at least one staged run path or fixture-backed equivalent
-5. Merge PR `#56` when the Solo Operator accepts the diff.
 
 ## Current Operating Guidance
 
-Use `origin/main` when you need the stable manual OS.
-
-Use PR `#56` / branch `codex/land-automation-layer` when you need to inspect or continue the provider/DAG/Ralph orchestration work.
+Use `origin/main` when you need the stable manual OS or the landed provider/DAG/Ralph orchestration work.
 
 Do not use the live GitHub Project board as the sole source of truth for implementation completeness. Project visibility is now restored, but the automation layer still needs source/test/docs review before issue state should move.
