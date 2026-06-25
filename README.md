@@ -24,6 +24,7 @@ pnpm qa
 `pnpm ops` is the Guided Flow entrypoint. The lower-level commands remain available for Manual Mode.
 `pnpm ops console -- --port 4173` launches a local artifact-first workflow console over Setup, Context, PRD, Graph, Execution, and Review.
 `pnpm ops run -- --execute --live-provider` defaults to Codex and can use Claude Code with `--provider claude` when that CLI is installed and authenticated.
+`pnpm ops worktree-clean` previews stale unreferenced `.worktrees` cleanup; add `--apply` only when you want deletion.
 `pnpm verify:project` runs the repeatable readiness check: setup, tests, console smoke, GitHub auth, and Project export visibility.
 
 The canonical operator walkthrough lives in `docs/agents/manual-walkthrough.md`. Use that file as the exact manual happy path. `README.md` is the top-level map; `docs/agents/workflow.md` is the contract summary.

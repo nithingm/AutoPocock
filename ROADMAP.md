@@ -107,6 +107,7 @@ Execution lanes:
 - `pnpm ops dispatch`: create audited manual dispatch artifacts, while scheduler-sourced dispatches are created by `schedule -- --dispatch`.
 - `pnpm ops claim`: local file-backed claiming uses an exclusive dispatch-artifact lock and re-reads state before mutation.
 - `pnpm ops run`: validate claimed dispatches, prepare worktrees, and execute through stub/live provider boundaries; Codex is the default live provider and Claude Code can be selected with `--provider claude`; a future extension can harden external runner deployment.
+- `pnpm ops worktree-clean`: dry-run-first cleanup for stale unreferenced `.worktrees` directories; deletion requires `--apply`.
 - `pnpm ops review-prep`: validate Review Entry Gate inputs and generate advisory Review Prep when the gate passes.
 - `pnpm ops qa`: load issue, PR, handoff, completion, and review prep context from GitHub.
 - `pnpm ops feedback`: classify QA defects locally by default; `--apply` either posts Same-PR Fix candidates to the PR or creates follow-up GitHub issues for broader bugs.
@@ -115,7 +116,6 @@ Execution lanes:
 
 - How much of GitHub Project creation, field creation, and view setup should be automated beyond the current report-first contract.
 - Additional provider adapters beyond Codex and Claude Code, if the product boundary expands to more CLIs or hosted runners.
-- Worktree directory layout and cleanup policy.
 - Docker image contract and mounted workspace layout.
 - How to extend Dispatch Claim locking beyond local filesystem coordination for distributed runners.
 - How approved repo-local Durable Memory decisions should sync into external/user-level memory stores, if that becomes part of the product boundary.

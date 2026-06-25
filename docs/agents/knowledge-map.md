@@ -90,7 +90,7 @@ pnpm test
 
 Observed:
 
-- 202 tests passed
+- 203 tests passed
 - 0 tests failed
 
 Latest readiness checks recorded there:
@@ -128,11 +128,10 @@ Observed:
 The core landing and tracker reconciliation are complete. Remaining work is product hardening beyond the current local prototype:
 
 1. Automate GitHub Project creation, fields, and views beyond report-first bootstrap.
-2. Define worktree retention and cleanup policy.
-3. Add Docker runner isolation before high-concurrency AFK execution.
-4. Extend dispatch claim locking beyond local filesystem coordination for distributed runners.
-5. Decide whether approved repo-local memory decisions should sync into external/user-level memory stores.
-6. Re-run full local tests plus strict live tracker verification after any follow-up updates.
+2. Add Docker runner isolation before high-concurrency AFK execution.
+3. Extend dispatch claim locking beyond local filesystem coordination for distributed runners.
+4. Decide whether approved repo-local memory decisions should sync into external/user-level memory stores.
+5. Re-run full local tests plus strict live tracker verification after any follow-up updates.
 
 ## Continuation Brief
 

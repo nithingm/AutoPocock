@@ -4,3 +4,4 @@ docs/QA/*.generated.md
 .ai/ralph-runs/
 .ai/queue.json
 .ai/tmp-*
+.worktrees/

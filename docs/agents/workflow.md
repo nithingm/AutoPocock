@@ -64,6 +64,7 @@ The Umbrella CLI stages the workflow:
 - `pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --prepare-worktree`: prepare the local worktree directory for a claimed worktree dispatch, then print the Runner Plan
 - `pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --execute`: execute from the approved Loop Spec, persist Provider Run metadata plus stdout/stderr logs, and enforce runtime stop/escalation conditions
 - `pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --execute --live-provider --provider claude`: run the same provider-neutral Loop Spec through the Claude Code adapter instead of the default Codex adapter
+- `pnpm ops worktree-clean -- --max-age-hours 168`: preview stale unreferenced `.worktrees` cleanup; add `--apply` to delete only the listed unreferenced directories
 - `pnpm ops run-mirror -- --run .ai/provider-runs/provider-run-id.json --issue 123`: dry-run a Provider Run update for a GitHub issue; add `--apply --update-existing` to refresh an existing marked Provider Run comment instead of posting a duplicate
 - `pnpm ops console -- --port 4173 --host 127.0.0.1`: launch the local workflow console UI over the same artifact and gate contracts the CLI uses
 
@@ -209,6 +210,7 @@ To make the whole flow work end-to-end as the Solo Operator:
 - Export or prepare `.ai/queue.json`, then run `pnpm ops schedule -- --apply` to reserve eligible work on the Project, `pnpm ops schedule -- --dispatch` to create dispatch artifacts, or both flags together when you want the generated `Dispatch ID` reflected in GitHub.
 - Claim dispatches with a stable runner identity using `pnpm ops claim`; the command uses an exclusive local dispatch-artifact lock and re-reads state before mutation. For worktree isolation, keep the derived or explicit `worktree_path` available locally.
 - Use `pnpm ops run -- --prepare-worktree` when a claimed dispatch is worktree-isolated and you want the local directory created before any future execution layer.
+- Use `pnpm ops worktree-clean` periodically to remove old unreferenced `.worktrees` directories; referenced dispatches and Provider Runs are always kept by that command.
 - Use `pnpm ops claim-status` to inspect old claims before restarting or recycling work.
 - Use `pnpm ops reclaim` only when you have decided the old claim should be abandoned; the reclaim command records that approval locally.
 - Use `pnpm ops run` as the final local validation step before any future provider execution layer.

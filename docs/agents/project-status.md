@@ -31,7 +31,7 @@ pnpm test
 
 Observed result:
 
-- 202 tests passed
+- 203 tests passed
 - 0 tests failed
 
 This proves the current local source tree is internally coherent.
@@ -154,12 +154,11 @@ The local Ralph run state is stale: it still records `#45` as `in_progress` and 
 The core landing and tracker reconciliation are complete. Remaining work is product hardening beyond the current local prototype:
 
 1. Automate GitHub Project creation, field creation, and view setup beyond the current report-first bootstrap contract.
-2. Define worktree directory layout, retention, and cleanup policy.
-3. Add Docker runner isolation before high-concurrency AFK execution.
-4. Extend dispatch claim locking beyond local filesystem coordination for distributed runners.
-5. Decide whether approved repo-local Durable Memory decisions should sync into external/user-level memory stores.
-6. Add more provider adapters only when a concrete provider boundary is needed beyond Codex and Claude Code.
-7. Run a live end-to-end validation after any follow-up changes:
+2. Add Docker runner isolation before high-concurrency AFK execution.
+3. Extend dispatch claim locking beyond local filesystem coordination for distributed runners.
+4. Decide whether approved repo-local Durable Memory decisions should sync into external/user-level memory stores.
+5. Add more provider adapters only when a concrete provider boundary is needed beyond Codex and Claude Code.
+6. Run a live end-to-end validation after any follow-up changes:
    - `pnpm verify:project -- --strict-external`
    - `pnpm ops setup`
    - `pnpm ops github:export -- --issue <target>`

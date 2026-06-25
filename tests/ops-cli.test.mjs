@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, stat, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -1908,6 +1908,70 @@ test("run --prepare-worktree rejects branch-isolated dispatches", async () => {
 
   assert.notEqual(result.code, 0);
   assert.match(result.stderr, /requires a worktree-isolated dispatch/);
+});
+
+test("worktree-clean deletes only stale unreferenced worktrees when applied", async () => {
+  const cwd = await makeWorkspace();
+  const worktreeRoot = path.join(cwd, ".worktrees");
+  const referenced = path.join(worktreeRoot, "referenced");
+  const providerReferenced = path.join(worktreeRoot, "provider-referenced");
+  const staleUnreferenced = path.join(worktreeRoot, "stale-unreferenced");
+  const youngUnreferenced = path.join(worktreeRoot, "young-unreferenced");
+  await mkdir(referenced, { recursive: true });
+  await mkdir(providerReferenced, { recursive: true });
+  await mkdir(staleUnreferenced, { recursive: true });
+  await mkdir(youngUnreferenced, { recursive: true });
+
+  const oldDate = new Date(Date.now() - 3 * 60 * 60 * 1000);
+  await utimes(referenced, oldDate, oldDate);
+  await utimes(providerReferenced, oldDate, oldDate);
+  await utimes(staleUnreferenced, oldDate, oldDate);
+
+  await writeDispatch(cwd, "dispatch-referenced.json", {
+    dispatch_id: "dispatch-referenced",
+    issue_id: "ISSUE-WT",
+    status: "claimed",
+    worktree_path: referenced,
+    claim: {
+      claimed_by: "runner-wt",
+      claimed_at: "2026-05-14T02:00:00.000Z",
+      isolation_mode: "worktree",
+    },
+  });
+  await mkdir(path.join(cwd, ".ai", "provider-runs"), { recursive: true });
+  await writeFile(
+    path.join(cwd, ".ai", "provider-runs", "provider-run-wt.json"),
+    `${JSON.stringify(
+      {
+        run_id: "provider-run-wt",
+        execution: {
+          worktree_path: providerReferenced,
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const dryRun = await runOps(cwd, ["worktree-clean", "--max-age-hours", "1"]);
+
+  assert.equal(dryRun.code, 0, dryRun.stderr || dryRun.stdout);
+  assert.match(dryRun.stdout, /Mode: dry-run/);
+  assert.match(dryRun.stdout, new RegExp(`keep-referenced: ${escapeRegex(referenced)}`));
+  assert.match(dryRun.stdout, new RegExp(`keep-referenced: ${escapeRegex(providerReferenced)}`));
+  assert.match(dryRun.stdout, new RegExp(`delete: ${escapeRegex(staleUnreferenced)}`));
+  assert.match(dryRun.stdout, new RegExp(`keep-young: ${escapeRegex(youngUnreferenced)}`));
+  await stat(staleUnreferenced);
+
+  const applied = await runOps(cwd, ["worktree-clean", "--max-age-hours", "1", "--apply"]);
+
+  assert.equal(applied.code, 0, applied.stderr || applied.stdout);
+  assert.match(applied.stdout, /Mode: apply/);
+  assert.match(applied.stdout, /Deleted: 1/);
+  await stat(referenced);
+  await stat(providerReferenced);
+  await stat(youngUnreferenced);
+  await assert.rejects(() => stat(staleUnreferenced));
 });
 
 test("ralph initializes a durable run state and prints the first wave", async () => {

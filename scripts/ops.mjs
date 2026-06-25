@@ -112,6 +112,7 @@ Usage:
   pnpm ops run-status -- --run .ai/provider-runs/provider-run-id.json
   pnpm ops run-cancel -- --run .ai/provider-runs/provider-run-id.json --approved-by solo-operator --reason "No longer needed"
   pnpm ops run-mirror -- --run .ai/provider-runs/provider-run-id.json --issue 23
+  pnpm ops worktree-clean -- --max-age-hours 168
 
 Guided Flow is the preferred UX. Manual Mode commands remain available as pnpm prd, pnpm issues, and pnpm qa.
 `;
@@ -369,6 +370,34 @@ async function listDispatchArtifacts() {
   }
 
   return artifacts;
+}
+
+async function listProviderRunMetadata() {
+  const providerRunDir = path.join(cwd, ".ai", "provider-runs");
+  let entries = [];
+
+  try {
+    entries = await readdir(providerRunDir);
+  } catch {
+    return [];
+  }
+
+  const metadata = [];
+
+  for (const entry of entries.filter((value) => value.endsWith(".json") && !value.endsWith("-bundle.json")).sort()) {
+    const fullPath = path.join(providerRunDir, entry);
+
+    try {
+      metadata.push({
+        fullPath,
+        metadata: JSON.parse(await readFile(fullPath, "utf8")),
+      });
+    } catch {
+      // Ignore invalid runtime metadata during cleanup planning.
+    }
+  }
+
+  return metadata;
 }
 
 async function withDispatchArtifactLock(fullPath, callback) {
@@ -2430,6 +2459,126 @@ async function reclaim(args) {
   process.stdout.write(`Reclaimed by ${approvedBy}. Dispatch returned to queued.\n`);
 }
 
+function normalizeAbsolutePath(targetPath) {
+  return path.resolve(path.isAbsolute(targetPath) ? targetPath : path.join(cwd, targetPath));
+}
+
+function assertInsideWorktreeRoot(targetPath, worktreeRoot) {
+  const relative = path.relative(worktreeRoot, targetPath);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`Refusing to clean path outside .worktrees: ${targetPath}`);
+  }
+}
+
+async function collectWorktreeReferences(worktreeRoot) {
+  const references = new Map();
+  const addReference = (worktreePath, label) => {
+    if (!worktreePath) {
+      return;
+    }
+
+    const resolved = normalizeAbsolutePath(worktreePath);
+    const relative = path.relative(worktreeRoot, resolved);
+    if (relative.startsWith("..") || path.isAbsolute(relative)) {
+      return;
+    }
+
+    const existing = references.get(resolved) || [];
+    references.set(resolved, [...existing, label]);
+  };
+
+  for (const { artifact } of await listDispatchArtifacts()) {
+    addReference(artifact.worktree_path, `dispatch:${artifact.dispatch_id || artifact.issue_id || "unknown"}`);
+  }
+
+  for (const { metadata } of await listProviderRunMetadata()) {
+    addReference(metadata.execution?.worktree_path, `provider-run:${metadata.run_id || metadata.dispatch_id || "unknown"}`);
+  }
+
+  return references;
+}
+
+async function planWorktreeCleanup({ maxAgeHours = 168 } = {}) {
+  const worktreeRoot = path.join(cwd, ".worktrees");
+  if (!(await pathExists(worktreeRoot))) {
+    return {
+      worktreeRoot,
+      entries: [],
+    };
+  }
+
+  const references = await collectWorktreeReferences(worktreeRoot);
+  const dirEntries = await readdir(worktreeRoot, { withFileTypes: true });
+  const now = Date.now();
+  const entries = [];
+
+  for (const entry of dirEntries.filter((value) => value.isDirectory()).sort((left, right) => left.name.localeCompare(right.name))) {
+    const fullPath = path.join(worktreeRoot, entry.name);
+    assertInsideWorktreeRoot(fullPath, worktreeRoot);
+    const info = await stat(fullPath);
+    const ageHours = (now - info.mtime.getTime()) / (1000 * 60 * 60);
+    const referencedBy = references.get(path.resolve(fullPath)) || [];
+    const eligible = referencedBy.length === 0 && ageHours >= maxAgeHours;
+    entries.push({
+      path: fullPath,
+      ageHours,
+      referencedBy,
+      action: referencedBy.length > 0 ? "keep-referenced" : eligible ? "delete" : "keep-young",
+    });
+  }
+
+  return {
+    worktreeRoot,
+    entries,
+  };
+}
+
+async function worktreeClean(args) {
+  const apply = args.includes("--apply");
+  const maxAgeValue = Number.parseFloat(readOption(args, "max-age-hours", "168"));
+  const maxAgeHours = Number.isFinite(maxAgeValue) && maxAgeValue >= 0 ? maxAgeValue : 168;
+  const plan = await planWorktreeCleanup({ maxAgeHours });
+  const deleteEntries = plan.entries.filter((entry) => entry.action === "delete");
+
+  if (apply) {
+    for (const entry of deleteEntries) {
+      assertInsideWorktreeRoot(entry.path, plan.worktreeRoot);
+      await rm(entry.path, { recursive: true, force: true });
+    }
+  }
+
+  const lines = [
+    "# Worktree Cleanup",
+    "",
+    `Root: ${plan.worktreeRoot}`,
+    `Mode: ${apply ? "apply" : "dry-run"}`,
+    `Retention: unreferenced worktrees at least ${maxAgeHours} hours old`,
+    `Deleted: ${apply ? deleteEntries.length : 0}`,
+    "",
+    "Policy:",
+    "- Only directories directly under `.worktrees` are considered.",
+    "- Dispatch artifacts and Provider Run metadata are treated as active references.",
+    "- Referenced worktrees are never removed by this command.",
+    "- Deletion requires `--apply`.",
+    "",
+    "Entries:",
+  ];
+
+  if (plan.entries.length === 0) {
+    lines.push("- None");
+  } else {
+    for (const entry of plan.entries) {
+      lines.push(
+        `- ${entry.action}: ${entry.path} (${entry.ageHours.toFixed(2)}h old${
+          entry.referencedBy.length > 0 ? `; referenced by ${entry.referencedBy.join(", ")}` : ""
+        })`,
+      );
+    }
+  }
+
+  process.stdout.write(`${lines.join("\n")}\n`);
+}
+
 async function runDispatch(args) {
   const prepareWorktree = args.includes("--prepare-worktree");
   const execute = args.includes("--execute");
@@ -3305,6 +3454,11 @@ async function main() {
 
   if (command === "run-mirror") {
     await runMirror(args);
+    return;
+  }
+
+  if (command === "worktree-clean") {
+    await worktreeClean(args);
     return;
   }
 
