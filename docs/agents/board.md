@@ -126,9 +126,10 @@ The claim implementation is file-backed and locally locked:
 - It updates dispatch JSON from `queued` to `claimed`.
 - It records `claimed_by`, `claimed_at`, and `isolation_mode`.
 - It refuses to claim dispatches that are not `queued`.
+- `pnpm ops claim -- --apply-tracker` writes the claimed runner into the GitHub Project `Runner` field when the dispatch artifact has `project_item_id`.
 - `pnpm ops claim-status` reports claim age and whether the claim appears stale.
 - `pnpm ops reclaim` returns a claimed dispatch to `queued` only with explicit Solo Operator approval and a recorded reason.
-- Distributed claim coordination beyond the local filesystem belongs in the future runner layer.
+- True distributed compare-and-swap locking, lease expiry, and recovery beyond the tracker-visible runner lease belong in the future runner layer.
 
 ## Runner Stub
 

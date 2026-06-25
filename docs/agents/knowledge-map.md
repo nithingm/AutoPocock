@@ -90,7 +90,7 @@ pnpm test
 
 Observed:
 
-- 210 tests passed
+- 211 tests passed
 - 0 tests failed
 
 Latest readiness checks recorded there:
@@ -111,6 +111,7 @@ Observed:
 - `github:init -- --apply --create-project` is now a guarded fresh-setup path that refuses duplicate Project creation when a Project reference exists
 - `github:init -- --apply --create-project-fields` created the missing configured optional Project fields, while continuing to report existing drift without rewriting fields
 - `run -- --prepare-docker` now exposes Docker image/workspace/network isolation plans and Docker-isolated `--execute` records a blocked Provider Run until in-container provider launch is wired
+- `claim -- --apply-tracker` can write the runner lease to the GitHub Project `Runner` field when a scheduler-created dispatch retained its `project_item_id`
 - GitHub auth is live for account `nithingm` and has sufficient Project access for the strict verifier
 - GitHub bootstrap remains dry-run-first and reports drift instead of destructive mutation
 - issue `#45` is confirmed closed and absent from the active non-Done Project export after issues `#44` through `#55` were closed and reconciled
@@ -132,7 +133,7 @@ The core landing and tracker reconciliation are complete. Remaining work is prod
 
 1. Automate GitHub Project views beyond report-first bootstrap.
 2. Wire provider execution inside the prepared Docker container boundary before high-concurrency AFK execution.
-3. Extend dispatch claim locking beyond local filesystem coordination for distributed runners.
+3. Replace tracker-visible claim leases with true distributed compare-and-swap locking, lease expiry, and recovery for multiple runners.
 4. Decide whether approved repo-local memory decisions should sync into external/user-level memory stores.
 5. Re-run full local tests plus strict live tracker verification after any follow-up updates.
 

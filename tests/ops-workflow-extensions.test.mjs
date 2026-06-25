@@ -79,7 +79,7 @@ printf '%s\\n' "$*" >> "$GH_LOG"
 if [ "$1" = "--version" ]; then echo "gh version 2.0.0"; exit 0; fi
 if [ "$1" = "auth" ] && [ "$2" = "status" ]; then exit 0; fi
 if [ "$1" = "project" ] && [ "$2" = "view" ]; then echo '{"id":"PVT_fake_project"}'; exit 0; fi
-if [ "$1" = "project" ] && [ "$2" = "field-list" ]; then echo '{"fields":[{"id":"stage-field","name":"Execution Stage","options":[{"id":"afk-option","name":"AFK In Progress"}],"type":"ProjectV2SingleSelectField"},{"id":"lane-field","name":"Execution Lane","options":[{"id":"execution-option","name":"Execution"}],"type":"ProjectV2SingleSelectField"},{"id":"last-plan-field","name":"Last Scheduler Plan","type":"ProjectV2Field"},{"id":"dispatch-id-field","name":"Dispatch ID","type":"ProjectV2Field"}]}'; exit 0; fi
+if [ "$1" = "project" ] && [ "$2" = "field-list" ]; then echo '{"fields":[{"id":"stage-field","name":"Execution Stage","options":[{"id":"afk-option","name":"AFK In Progress"}],"type":"ProjectV2SingleSelectField"},{"id":"lane-field","name":"Execution Lane","options":[{"id":"execution-option","name":"Execution"}],"type":"ProjectV2SingleSelectField"},{"id":"last-plan-field","name":"Last Scheduler Plan","type":"ProjectV2Field"},{"id":"dispatch-id-field","name":"Dispatch ID","type":"ProjectV2Field"},{"id":"runner-field","name":"Runner","type":"ProjectV2Field"}]}'; exit 0; fi
 if [ "$1" = "project" ] && [ "$2" = "item-edit" ]; then exit 0; fi
 if [ "$1" = "issue" ] && [ "$2" = "create" ]; then echo "https://github.com/example/repo/issues/999"; exit 0; fi
 if [ "$1" = "issue" ] && [ "$2" = "view" ]; then printf '{"comments":[{"id":"IC_existing","body":"%s","url":"https://github.com/example/repo/issues/%s#issuecomment-7"}]}\\n' "$EXISTING_MIRROR_MARKER" "$3"; exit 0; fi
@@ -107,7 +107,7 @@ if "%1"=="project" if "%2"=="view" (
   exit /b 0
 )
 if "%1"=="project" if "%2"=="field-list" (
-  echo {"fields":[{"id":"stage-field","name":"Execution Stage","options":[{"id":"afk-option","name":"AFK In Progress"}],"type":"ProjectV2SingleSelectField"},{"id":"lane-field","name":"Execution Lane","options":[{"id":"execution-option","name":"Execution"}],"type":"ProjectV2SingleSelectField"},{"id":"last-plan-field","name":"Last Scheduler Plan","type":"ProjectV2Field"},{"id":"dispatch-id-field","name":"Dispatch ID","type":"ProjectV2Field"}]}
+  echo {"fields":[{"id":"stage-field","name":"Execution Stage","options":[{"id":"afk-option","name":"AFK In Progress"}],"type":"ProjectV2SingleSelectField"},{"id":"lane-field","name":"Execution Lane","options":[{"id":"execution-option","name":"Execution"}],"type":"ProjectV2SingleSelectField"},{"id":"last-plan-field","name":"Last Scheduler Plan","type":"ProjectV2Field"},{"id":"dispatch-id-field","name":"Dispatch ID","type":"ProjectV2Field"},{"id":"runner-field","name":"Runner","type":"ProjectV2Field"}]}
   exit /b 0
 )
 if "%1"=="project" if "%2"=="item-edit" exit /b 0
@@ -1072,7 +1072,55 @@ test("schedule --apply --dispatch writes generated dispatch IDs back to the trac
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /Dispatch artifacts will be created and tracker fields will be updated/);
   assert.equal(artifact.issue_id, "#47");
+  assert.equal(artifact.project_item_id, "PVTI_dispatch_item");
   assert.match(ghLog, new RegExp(`project item-edit --id PVTI_dispatch_item --project-id PVT_fake_project --field-id dispatch-id-field --text ${artifact.dispatch_id}`));
+});
+
+test("claim --apply-tracker writes the claimed runner to the GitHub Project item", async () => {
+  const cwd = await makeWorkspace({
+    github: {
+      owner: "nithingm",
+      repo: "AutoPocock",
+      projectNumber: "1",
+    },
+  });
+  const fakeGh = await installFakeGh(cwd);
+  const dispatchPath = path.join(cwd, "docs", "agents", "dispatches", "dispatch-claim-lease.json");
+  await writeFile(
+    dispatchPath,
+    `${JSON.stringify(
+      {
+        dispatch_id: "dispatch-claim-lease",
+        issue_id: "#48",
+        title: "Claim lease proof",
+        status: "queued",
+        forbidden_actions: ["merge PR"],
+        expected_branch: "agent/48-claim-lease-proof",
+        isolation_mode: "worktree",
+        worktree_path: path.join(cwd, ".worktrees", "48-claim-lease-proof"),
+        project_item_id: "PVTI_claim_item",
+        handoff_artifact: "docs/agents/handoffs/48.md",
+        completion_report_target: "docs/agents/completions/dispatch-claim-lease.md",
+        claim: null,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const result = await runOps(cwd, ["claim", "--dispatch", dispatchPath, "--claimed-by", "runner-a", "--apply-tracker"], {
+    env: fakeGh.env,
+  });
+  const artifact = JSON.parse(await readFile(dispatchPath, "utf8"));
+  const ghLog = await readFile(fakeGh.logPath, "utf8");
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(artifact.status, "claimed");
+  assert.equal(artifact.claim.claimed_by, "runner-a");
+  assert.match(result.stdout, /Applied tracker claim lease for dispatch-claim-lease to Runner=runner-a/);
+  assert.match(ghLog, /project view 1 --owner nithingm --format json/);
+  assert.match(ghLog, /project field-list 1 --owner nithingm --format json --limit 100/);
+  assert.match(ghLog, /project item-edit --id PVTI_claim_item --project-id PVT_fake_project --field-id runner-field --text runner-a/);
 });
 
 test("review-decision approve moves a node into QA and writes a review artifact", async () => {

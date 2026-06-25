@@ -92,6 +92,7 @@ Usage:
   pnpm ops feedback -- --issue 123 --pr 456 --finding "QA finding text"
   pnpm ops dispatch -- --issue 123 --title "Implement slice" --source manual --override-reason "Solo Operator approved"
   pnpm ops claim -- --dispatch docs/agents/dispatches/dispatch-id.json --claimed-by runner-name --isolation-mode worktree
+  pnpm ops claim -- --dispatch docs/agents/dispatches/dispatch-id.json --claimed-by runner-name --apply-tracker
   pnpm ops claim-status -- --dispatch docs/agents/dispatches/dispatch-id.json --max-age-hours 24
   pnpm ops reclaim -- --dispatch docs/agents/dispatches/dispatch-id.json --approved-by solo-operator --reason "Runner abandoned work"
   pnpm ops qa -- --issue 123 --pr 456
@@ -1766,6 +1767,15 @@ function optionalTextMutation(fields, fieldName, value) {
   };
 }
 
+function requireTextMutation(fields, fieldName, value, commandName) {
+  const mutation = optionalTextMutation(fields, fieldName, value);
+  if (!mutation) {
+    throw new Error(`${commandName} requires Project field "${fieldName}". Add it to the GitHub Project or update .ai/ops.config.json.`);
+  }
+
+  return mutation;
+}
+
 function projectItemIdFor(item) {
   if (item.projectItemId) {
     return item.projectItemId;
@@ -1837,6 +1847,17 @@ async function applyScheduleTrackerUpdates({ dispatchable, dispatchIds, updateCo
   }
 
   process.stdout.write(`Applied scheduler tracker updates for ${dispatchable.length} item(s) (${fieldUpdates} field update(s)).\n`);
+}
+
+async function applyClaimTrackerLease({ config, args, artifact, runner }) {
+  if (!artifact?.project_item_id) {
+    throw new Error("claim -- --apply-tracker requires the dispatch artifact to include project_item_id. Regenerate the dispatch from `pnpm ops schedule -- --dispatch` using a GitHub-exported queue.");
+  }
+
+  const { projectId, fields } = await loadProjectMutationContext(config, args, "claim -- --apply-tracker");
+  const runnerMutation = requireTextMutation(fields, "Runner", runner, "claim -- --apply-tracker");
+  await runGh(["project", "item-edit", "--id", artifact.project_item_id, "--project-id", projectId, ...runnerMutation.args]);
+  process.stdout.write(`Applied tracker claim lease for ${artifact.dispatch_id} to Runner=${runner}.\n`);
 }
 
 async function gitHubExport(args) {
@@ -2328,6 +2349,7 @@ async function schedule(args) {
           risk: item.risk || "low",
           conflictSurface: item.conflictSurface || "low",
           isolationMode: "worktree",
+          projectItemId: projectItemIdFor(item),
         });
         dispatchIds.set(item.id, created.artifact.dispatch_id);
         process.stdout.write(`${created.jsonTarget}\n${created.mdTarget}\n`);
@@ -2398,6 +2420,7 @@ async function createDispatchArtifact({
   dockerImage = "",
   dockerWorkspace = "",
   dockerNetwork = "",
+  projectItemId = "",
 } = {}) {
   if (!issue) {
     throw new Error("Dispatch requires --issue.");
@@ -2450,6 +2473,7 @@ async function createDispatchArtifact({
     expected_branch: `agent/${slugify(issue)}-${slugify(title)}`,
     worktree_path: worktreePath,
     handoff_artifact: resolvedHandoff,
+    project_item_id: projectItemId,
     loop_spec_target: loopSpecTarget,
     completion_report_target: completionTarget,
     allowed_commands: ["run relevant tests", "update completion report"],
@@ -2498,6 +2522,8 @@ async function claim(args) {
   const requestedDockerImage = readOption(args, "docker-image");
   const requestedDockerWorkspace = readOption(args, "docker-workspace");
   const requestedDockerNetwork = readOption(args, "docker-network");
+  const applyTracker = args.includes("--apply-tracker");
+  let claimedArtifact = null;
 
   if (!claimedBy) {
     throw new Error("Claim requires --claimed-by.");
@@ -2546,7 +2572,19 @@ async function claim(args) {
     }
 
     await writeFile(fullPath, `${JSON.stringify(artifact, null, 2)}\n`, "utf8");
+    claimedArtifact = artifact;
   });
+
+  if (applyTracker) {
+    const config = await loadJson(".ai/ops.config.json");
+    await applyClaimTrackerLease({
+      config,
+      args,
+      artifact: claimedArtifact,
+      runner: claimedBy,
+    });
+  }
+
   process.stdout.write(`${fullPath}\n`);
 }
 

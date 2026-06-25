@@ -84,7 +84,7 @@ This scaffold deliberately stops before:
 - multi-agent orchestration
 - full in-container provider execution
 - autonomous backlog processing
-- distributed runner coordination
+- true distributed claim arbitration
 - memory synthesis loops
 - commit automation
 
