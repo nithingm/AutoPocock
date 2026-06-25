@@ -26,4 +26,4 @@ docker run --rm --network none autopocock-provider-runner:local sh -lc 'id -u &&
 
 ## Notes
 
-The image proves the local Docker runner boundary can carry both supported provider CLIs without relying on host tools. Production deployment still needs an operator-approved registry/tag and credential package, but `pnpm ops docker:publish-provider` now makes that choice explicit by validating the local image, printing the exact tag/push commands, and requiring `--apply --approved-by` before pushing.
+The image proves the local Docker runner boundary can carry both supported provider CLIs without relying on host tools. Production deployment still needs an operator-approved registry/tag and credential package, but `pnpm ops docker:publish-provider -- --write-plan` now makes that choice explicit by validating the local image, printing and persisting the exact tag/push commands, and requiring `--apply --approved-by` before pushing.

@@ -439,6 +439,7 @@ function dockerProviderPublishPlan({
   const pushArgs = ["push", target];
 
   return {
+    schema_version: "docker-provider-publish-plan/v1",
     sourceTag: source,
     targetTag: target,
     provider,
@@ -450,6 +451,55 @@ function dockerProviderPublishPlan({
     tagCommand: ["docker", ...tagArgs].join(" "),
     pushCommand: ["docker", ...pushArgs].join(" "),
   };
+}
+
+function renderDockerProviderPublishPlanMarkdown(plan, {
+  generatedAt = nowIso(),
+  mode = "dry-run",
+  approvedBy = "",
+} = {}) {
+  const lines = [
+    "# Prepared Human Step: Docker Provider Image Publish",
+    "",
+    `Generated: ${generatedAt}`,
+    `Mode: ${mode}`,
+    "",
+    "## Image",
+    "",
+    `- Source image: ${plan.sourceTag}`,
+    `- Target image: ${plan.targetTag}`,
+    `- Provider: ${plan.provider}`,
+    "",
+    "## Credential Package",
+    "",
+    `- Credential env allowlist: ${plan.envAllowlist.join(", ") || "none"}`,
+    `- Credential volumes: ${plan.credentialVolumes.join(", ") || "none"}`,
+    "- Policy: credentials are not baked into the image; runtime dispatches must opt in with `--docker-env` or `--docker-volume`.",
+    "",
+    "## Validation",
+    "",
+    `- Command: \`${plan.validation.rendered_command}\``,
+    `- Required commands: ${plan.validation.requiredCommands.join(", ")}`,
+    "- Expected: source image validates before any tag or push.",
+    "",
+    "## Publish Commands",
+    "",
+    `- Tag: \`${plan.tagCommand}\``,
+    `- Push: \`${plan.pushCommand}\``,
+    "",
+    "## Approval",
+    "",
+  ];
+
+  if (mode === "apply") {
+    lines.push(`- Approved by: ${approvedBy || "unknown"}`);
+    lines.push("- Status: tag and push were executed.");
+  } else {
+    lines.push("- Status: dry-run only; no tag or push was executed.");
+    lines.push("- Apply: rerun with `--apply --approved-by <operator>` after `docker login`, registry/tag, and credential package are accepted.");
+  }
+
+  return `${lines.join("\n")}\n`;
 }
 
 function queueRecoveryMessage(queuePath) {
@@ -3641,6 +3691,7 @@ async function dockerPublishProvider(args) {
     ...splitOptionList(readOption(args, "credential-volume")),
   ]);
   const apply = args.includes("--apply");
+  const writePlan = args.includes("--write-plan");
   const approvedBy = readOption(args, "approved-by", "");
 
   if (!targetTag) {
@@ -3742,6 +3793,54 @@ async function dockerPublishProvider(args) {
   }
   if (validationExecution.stderr) {
     lines.push("", "## Validation stderr", "", validationExecution.stderr.trim());
+  }
+
+  if (writePlan) {
+    const generatedAt = nowIso();
+    const fileSlug = `${nowForFile()}-docker-provider-publish`;
+    const dir = path.join(cwd, "docs", "agents", "hitl");
+    const jsonPath = path.join(dir, `${fileSlug}.json`);
+    const markdownPath = path.join(dir, `${fileSlug}.md`);
+    const artifact = {
+      schema_version: plan.schema_version,
+      generated_at: generatedAt,
+      mode: apply ? "apply" : "dry-run",
+      source_image: plan.sourceTag,
+      target_image: plan.targetTag,
+      provider: plan.provider,
+      credential_policy: {
+        env_allowlist: plan.envAllowlist,
+        volumes: plan.credentialVolumes,
+        credentials_baked_into_image: false,
+        runtime_opt_in_required: true,
+      },
+      validation: {
+        command: plan.validation.rendered_command,
+        required_commands: plan.validation.requiredCommands,
+        status: "passed",
+      },
+      publish_commands: {
+        tag: plan.tagCommand,
+        push: plan.pushCommand,
+      },
+      approval: {
+        required_for_push: true,
+        approved_by: apply ? approvedBy : "",
+        applied: apply,
+      },
+    };
+    await mkdir(dir, { recursive: true });
+    await writeFile(jsonPath, `${JSON.stringify(artifact, null, 2)}\n`, "utf8");
+    await writeFile(
+      markdownPath,
+      renderDockerProviderPublishPlanMarkdown(plan, {
+        generatedAt,
+        mode: apply ? "apply" : "dry-run",
+        approvedBy,
+      }),
+      "utf8",
+    );
+    lines.push("", "## Publish Plan Artifact", "", `- JSON: ${jsonPath}`, `- Markdown: ${markdownPath}`);
   }
 
   process.stdout.write(`${lines.join("\n")}\n`);

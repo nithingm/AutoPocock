@@ -272,10 +272,17 @@ test("docker:publish-provider validates and prints a dry-run publish plan withou
     "CLAUDE_CONFIG_DIR",
     "--credential-volume",
     "claude-cache:/claude-cache",
+    "--write-plan",
   ], {
     env: fakeDocker.env,
   });
   const dockerLog = await readFile(fakeDocker.logPath, "utf8");
+  const hitlDir = path.join(cwd, "docs", "agents", "hitl");
+  const artifacts = await readdir(hitlDir);
+  const markdownName = artifacts.find((entry) => entry.endsWith("-docker-provider-publish.md"));
+  const jsonName = artifacts.find((entry) => entry.endsWith("-docker-provider-publish.json"));
+  const markdown = await readFile(path.join(hitlDir, markdownName), "utf8");
+  const json = JSON.parse(await readFile(path.join(hitlDir, jsonName), "utf8"));
 
   assert.equal(result.code, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /# Docker Provider Image Publish Plan/);
@@ -288,9 +295,17 @@ test("docker:publish-provider validates and prints a dry-run publish plan withou
   assert.match(result.stdout, /Tag command: docker tag autopocock-provider-runner:test ghcr\.io\/example\/autopocock-provider-runner:test/);
   assert.match(result.stdout, /Push command: docker push ghcr\.io\/example\/autopocock-provider-runner:test/);
   assert.match(result.stdout, /Apply: rerun with `--apply --approved-by <operator>`/);
+  assert.match(result.stdout, /## Publish Plan Artifact/);
   assert.match(dockerLog, /run --rm --network none autopocock-provider-runner:test sh -lc/);
   assert.doesNotMatch(dockerLog, /tag autopocock-provider-runner:test/);
   assert.doesNotMatch(dockerLog, /push ghcr\.io\/example\/autopocock-provider-runner:test/);
+  assert.match(markdown, /Prepared Human Step: Docker Provider Image Publish/);
+  assert.match(markdown, /Target image: ghcr\.io\/example\/autopocock-provider-runner:test/);
+  assert.match(markdown, /Credential env allowlist: CLAUDE_CONFIG_DIR/);
+  assert.equal(json.schema_version, "docker-provider-publish-plan/v1");
+  assert.equal(json.target_image, "ghcr.io/example/autopocock-provider-runner:test");
+  assert.deepEqual(json.credential_policy.env_allowlist, ["CLAUDE_CONFIG_DIR"]);
+  assert.equal(json.approval.applied, false);
 });
 
 test("docker:publish-provider requires approval before applying tag and push", async () => {

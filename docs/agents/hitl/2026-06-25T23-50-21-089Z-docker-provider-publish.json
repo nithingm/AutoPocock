@@ -1,0 +1,38 @@
+{
+  "schema_version": "docker-provider-publish-plan/v1",
+  "generated_at": "2026-06-25T23:50:21.088Z",
+  "mode": "dry-run",
+  "source_image": "autopocock-provider-runner:local",
+  "target_image": "ghcr.io/nithingm/autopocock-provider-runner:local",
+  "provider": "codex",
+  "credential_policy": {
+    "env_allowlist": [
+      "CODEX_HOME"
+    ],
+    "volumes": [
+      "codex-cache:/codex-cache"
+    ],
+    "credentials_baked_into_image": false,
+    "runtime_opt_in_required": true
+  },
+  "validation": {
+    "command": "docker run --rm --network none autopocock-provider-runner:local sh -lc set -eu && command -v node >/dev/null || { echo \"missing command: node\" >&2; exit 1; } && command -v pnpm >/dev/null || { echo \"missing command: pnpm\" >&2; exit 1; } && command -v git >/dev/null || { echo \"missing command: git\" >&2; exit 1; } && command -v codex >/dev/null || { echo \"missing command: codex\" >&2; exit 1; } && command -v claude >/dev/null || { echo \"missing command: claude\" >&2; exit 1; } && node --version >/dev/null && pnpm --version >/dev/null && git --version >/dev/null && codex --version >/dev/null && claude --version >/dev/null",
+    "required_commands": [
+      "node",
+      "pnpm",
+      "git",
+      "codex",
+      "claude"
+    ],
+    "status": "passed"
+  },
+  "publish_commands": {
+    "tag": "docker tag autopocock-provider-runner:local ghcr.io/nithingm/autopocock-provider-runner:local",
+    "push": "docker push ghcr.io/nithingm/autopocock-provider-runner:local"
+  },
+  "approval": {
+    "required_for_push": true,
+    "approved_by": "",
+    "applied": false
+  }
+}
