@@ -1997,6 +1997,77 @@ test("reclaim returns a claimed dispatch to queued only with recorded approval",
   assert.equal(artifact.claim_history[0].stale_at_reclaim, true);
 });
 
+test("reclaim-expired is dry-run-first and applies only stale claimed dispatches", async () => {
+  const cwd = await makeWorkspace();
+  const expiredPath = await writeDispatch(cwd, "dispatch-expired.json", {
+    dispatch_id: "dispatch-expired",
+    issue_id: "ISSUE-16",
+    status: "claimed",
+    forbidden_actions: ["merge PR"],
+    expected_branch: "agent/expired",
+    isolation_mode: "worktree",
+    worktree_path: "D:\\temp\\expired",
+    handoff_artifact: "",
+    completion_report_target: "docs/agents/completions/dispatch-expired.md",
+    claim: {
+      claimed_by: "runner-expired",
+      claimed_at: "2026-06-25T00:00:00.000Z",
+      lease_hours: 1,
+      expires_at: "2026-06-25T00:00:01.000Z",
+      isolation_mode: "worktree",
+    },
+  });
+  const activePath = await writeDispatch(cwd, "dispatch-active.json", {
+    dispatch_id: "dispatch-active",
+    issue_id: "ISSUE-17",
+    status: "claimed",
+    forbidden_actions: ["merge PR"],
+    expected_branch: "agent/active",
+    isolation_mode: "worktree",
+    worktree_path: "D:\\temp\\active",
+    handoff_artifact: "",
+    completion_report_target: "docs/agents/completions/dispatch-active.md",
+    claim: {
+      claimed_by: "runner-active",
+      claimed_at: "2026-06-25T00:00:00.000Z",
+      lease_hours: 1,
+      expires_at: "2999-01-01T00:00:00.000Z",
+      isolation_mode: "worktree",
+    },
+  });
+
+  const dryRun = await runOps(cwd, ["reclaim-expired"]);
+  let expired = JSON.parse(await readFile(expiredPath, "utf8"));
+  let active = JSON.parse(await readFile(activePath, "utf8"));
+
+  assert.equal(dryRun.code, 0, dryRun.stderr);
+  assert.match(dryRun.stdout, /Mode: dry-run/);
+  assert.match(dryRun.stdout, /Expired claims: 1/);
+  assert.match(dryRun.stdout, /dispatch-expired/);
+  assert.equal(expired.status, "claimed");
+  assert.equal(active.status, "claimed");
+
+  const applied = await runOps(cwd, [
+    "reclaim-expired",
+    "--apply",
+    "--approved-by",
+    "solo-operator",
+    "--reason",
+    "Lease expired",
+  ]);
+  expired = JSON.parse(await readFile(expiredPath, "utf8"));
+  active = JSON.parse(await readFile(activePath, "utf8"));
+
+  assert.equal(applied.code, 0, applied.stderr);
+  assert.match(applied.stdout, /Applied expired-claim enforcement for 1 dispatch artifact/);
+  assert.equal(expired.status, "queued");
+  assert.equal(expired.claim, null);
+  assert.equal(expired.claim_history[0].reclaimed_by, "solo-operator");
+  assert.equal(expired.claim_history[0].reclaim_reason, "Lease expired");
+  assert.equal(expired.claim_history[0].automated_lease_enforcement, true);
+  assert.equal(active.status, "claimed");
+});
+
 test("reclaim reports when no claimed dispatch matches the requested issue", async () => {
   const cwd = await makeWorkspace();
   await writeDispatch(cwd, "dispatch-issue-15.json", {

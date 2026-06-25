@@ -97,6 +97,8 @@ Usage:
   pnpm ops claim-status -- --dispatch docs/agents/dispatches/dispatch-id.json --max-age-hours 24
   pnpm ops reclaim -- --dispatch docs/agents/dispatches/dispatch-id.json --approved-by solo-operator --reason "Runner abandoned work"
   pnpm ops reclaim -- --dispatch docs/agents/dispatches/dispatch-id.json --approved-by solo-operator --reason "Runner abandoned work" --apply-tracker
+  pnpm ops reclaim-expired -- --max-age-hours 24
+  pnpm ops reclaim-expired -- --apply --approved-by solo-operator --reason "Lease expired" --apply-tracker
   pnpm ops qa -- --issue 123 --pr 456
   pnpm ops qa
   pnpm ops board
@@ -2720,6 +2722,100 @@ async function reclaim(args) {
   process.stdout.write(`Reclaimed by ${approvedBy}. Dispatch returned to queued.\n`);
 }
 
+async function reclaimExpired(args) {
+  const apply = args.includes("--apply");
+  const applyTracker = args.includes("--apply-tracker");
+  const approvedBy = readOption(args, "approved-by");
+  const reason = readOption(args, "reason", "Claim lease expired");
+  const maxAgeHours = parsePositiveNumber(readOption(args, "max-age-hours", "24"), 24, "reclaim-expired --max-age-hours");
+  const candidates = [];
+
+  if (apply && !approvedBy) {
+    throw new Error("reclaim-expired -- --apply requires --approved-by.");
+  }
+
+  if (apply && !reason) {
+    throw new Error("reclaim-expired -- --apply requires --reason.");
+  }
+
+  for (const { fullPath, artifact } of await listDispatchArtifacts()) {
+    if (artifact?.status !== "claimed" || !artifact?.claim) {
+      continue;
+    }
+
+    const inspection = inspectClaimAge(artifact, maxAgeHours);
+    if (inspection.stale) {
+      candidates.push({ fullPath, artifact, inspection });
+    }
+  }
+
+  const lines = [
+    "# Expired Claim Enforcement",
+    "",
+    `Mode: ${apply ? "apply" : "dry-run"}`,
+    `Max age hours fallback: ${maxAgeHours}`,
+    `Expired claims: ${candidates.length}`,
+  ];
+
+  for (const { fullPath, artifact, inspection } of candidates) {
+    lines.push(
+      `- ${artifact.dispatch_id || path.basename(fullPath)} (${artifact.issue_id || "no issue"}): claimed by ${artifact.claim?.claimed_by || "unknown"}, expires ${inspection.expiresAt || "N/A"}, age ${inspection.ageHours == null ? "N/A" : inspection.ageHours.toFixed(2)}h`,
+    );
+  }
+
+  if (!apply) {
+    lines.push("", "No dispatch artifacts were modified. Add `--apply --approved-by <operator> --reason \"...\"` to reclaim expired claims.");
+    process.stdout.write(`${lines.join("\n")}\n`);
+    return;
+  }
+
+  const reclaimedArtifacts = [];
+  for (const candidate of candidates) {
+    let reclaimedArtifact = null;
+    await withDispatchArtifactLock(candidate.fullPath, async () => {
+      const artifact = JSON.parse(await readFile(candidate.fullPath, "utf8"));
+      if (artifact.status !== "claimed" || !artifact.claim) {
+        return;
+      }
+
+      const inspection = inspectClaimAge(artifact, maxAgeHours);
+      if (!inspection.stale) {
+        return;
+      }
+
+      const historyEntry = {
+        ...artifact.claim,
+        reclaimed_at: nowIso(),
+        reclaimed_by: approvedBy,
+        reclaim_reason: reason,
+        stale_at_reclaim: inspection.stale,
+        age_hours_at_reclaim: inspection.ageHours == null ? null : Number(inspection.ageHours.toFixed(2)),
+        automated_lease_enforcement: true,
+      };
+      reclaimedArtifact = reclaimDispatchArtifact(artifact, historyEntry);
+      await writeFile(candidate.fullPath, `${JSON.stringify(reclaimedArtifact, null, 2)}\n`, "utf8");
+    });
+
+    if (reclaimedArtifact) {
+      reclaimedArtifacts.push(reclaimedArtifact);
+    }
+  }
+
+  if (applyTracker && reclaimedArtifacts.length > 0) {
+    const config = await loadJson(".ai/ops.config.json");
+    for (const artifact of reclaimedArtifacts) {
+      await clearClaimTrackerLease({
+        config,
+        args,
+        artifact,
+      });
+    }
+  }
+
+  lines.push("", `Applied expired-claim enforcement for ${reclaimedArtifacts.length} dispatch artifact(s).`);
+  process.stdout.write(`${lines.join("\n")}\n`);
+}
+
 function normalizeAbsolutePath(targetPath) {
   return path.resolve(path.isAbsolute(targetPath) ? targetPath : path.join(cwd, targetPath));
 }
@@ -3735,6 +3831,11 @@ async function main() {
 
   if (command === "reclaim") {
     await reclaim(args);
+    return;
+  }
+
+  if (command === "reclaim-expired") {
+    await reclaimExpired(args);
     return;
   }
 

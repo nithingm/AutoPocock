@@ -31,7 +31,7 @@ pnpm test
 
 Observed result:
 
-- 214 tests passed
+- 216 tests passed
 - 0 tests failed
 
 This proves the current local source tree is internally coherent.
@@ -159,7 +159,7 @@ The core landing and tracker reconciliation are complete. Remaining work is prod
 
 1. Automate GitHub Project view setup beyond the current report-first bootstrap contract.
 2. Wire provider execution inside the prepared Docker container boundary before high-concurrency AFK execution.
-3. Replace tracker-visible claim leases with true distributed compare-and-swap locking and automated lease enforcement for multiple runners.
+3. Replace tracker-visible claim leases with true distributed compare-and-swap locking for multiple runners.
 4. Add more provider adapters only when a concrete provider boundary is needed beyond Codex and Claude Code.
 5. Run a live end-to-end validation after any follow-up changes:
    - `pnpm verify:project -- --strict-external`

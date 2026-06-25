@@ -130,7 +130,8 @@ The claim implementation is file-backed and locally locked:
 - `pnpm ops claim-status` reports claim age, lease expiry, and whether the claim appears stale.
 - `pnpm ops reclaim` returns a claimed dispatch to `queued` only with explicit Solo Operator approval and a recorded reason.
 - `pnpm ops reclaim -- --apply-tracker` clears the GitHub Project `Runner` field when the dispatch artifact has `project_item_id`.
-- True distributed compare-and-swap locking and automated lease enforcement beyond the tracker-visible runner lease belong in the future runner layer.
+- `pnpm ops reclaim-expired` dry-runs expired lease enforcement across claimed dispatches; `--apply` reclaims expired dispatches with recorded approval, and `--apply-tracker` clears visible Project runner leases.
+- True distributed compare-and-swap locking beyond the tracker-visible runner lease belongs in the future runner layer.
 
 ## Runner Stub
 

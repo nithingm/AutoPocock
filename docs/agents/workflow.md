@@ -54,6 +54,8 @@ The Umbrella CLI stages the workflow:
 - `pnpm ops claim-status -- --dispatch docs/agents/dispatches/dispatch-id.json --max-age-hours 24`: inspect whether a claimed dispatch looks stale; explicit `expires_at` lease metadata is used when present, and `--max-age-hours` is the fallback for older claims
 - `pnpm ops reclaim -- --dispatch docs/agents/dispatches/dispatch-id.json --approved-by solo-operator --reason "Runner abandoned work"`: explicitly return a claimed dispatch to `queued`
 - `pnpm ops reclaim -- --dispatch docs/agents/dispatches/dispatch-id.json --approved-by solo-operator --reason "Runner abandoned work" --apply-tracker`: reclaim locally, then clear the GitHub Project `Runner` field when the dispatch artifact has `project_item_id`
+- `pnpm ops reclaim-expired -- --max-age-hours 24`: dry-run expired claim enforcement across all claimed dispatch artifacts
+- `pnpm ops reclaim-expired -- --apply --approved-by solo-operator --reason "Lease expired" --apply-tracker`: reclaim expired dispatches and clear tracker-visible runner leases when `project_item_id` exists
 - `pnpm ops qa -- --issue 123`: generate targeted QA for tracked work; add `--pr 456` only when a PR already exists and you want it called out in the checklist
 - `pnpm ops qa`: generate generic QA from recent commits
 - `pnpm ops board`: print the board, lane, and scheduler contract
@@ -220,6 +222,7 @@ To make the whole flow work end-to-end as the Solo Operator:
 - Use `pnpm ops worktree-clean` periodically to remove old unreferenced `.worktrees` directories; referenced dispatches and Provider Runs are always kept by that command.
 - Use `pnpm ops claim-status` to inspect old claims before restarting or recycling work.
 - Use `pnpm ops reclaim` only when you have decided the old claim should be abandoned; the reclaim command records that approval locally. Add `--apply-tracker` when a tracker-visible runner lease should be cleared from the Project item.
+- Use `pnpm ops reclaim-expired` as the dry-run-first batch path for expired leases. It requires `--apply --approved-by --reason` before returning dispatches to `queued`.
 - Use `pnpm ops run` as the final local validation step before any future provider execution layer.
 - Use `pnpm ops qa` and `pnpm ops feedback` after implementation so QA context and bug-vs-same-PR decisions are explicit.
 

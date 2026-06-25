@@ -90,7 +90,7 @@ pnpm test
 
 Observed:
 
-- 214 tests passed
+- 216 tests passed
 - 0 tests failed
 
 Latest readiness checks recorded there:
@@ -114,6 +114,7 @@ Observed:
 - `claim -- --apply-tracker` can write the runner lease to the GitHub Project `Runner` field when a scheduler-created dispatch retained its `project_item_id`
 - claims now record explicit lease expiry metadata, and `claim-status` uses `expires_at` when present before falling back to max-age inspection
 - `reclaim -- --apply-tracker` can clear that Project `Runner` lease during approved reclaim recovery
+- `reclaim-expired` can dry-run expired-lease enforcement, reclaim expired local dispatches with approval, and optionally clear tracker-visible runner leases
 - GitHub auth is live for account `nithingm` and has sufficient Project access for the strict verifier
 - GitHub bootstrap remains dry-run-first and reports drift instead of destructive mutation
 - issue `#45` is confirmed closed and absent from the active non-Done Project export after issues `#44` through `#55` were closed and reconciled
@@ -135,7 +136,7 @@ The core landing and tracker reconciliation are complete. Remaining work is prod
 
 1. Automate GitHub Project views beyond report-first bootstrap.
 2. Wire provider execution inside the prepared Docker container boundary before high-concurrency AFK execution.
-3. Replace tracker-visible claim leases with true distributed compare-and-swap locking and automated lease enforcement for multiple runners.
+3. Replace tracker-visible claim leases with true distributed compare-and-swap locking for multiple runners.
 4. Re-run full local tests plus strict live tracker verification after any follow-up updates.
 
 ## Continuation Brief
