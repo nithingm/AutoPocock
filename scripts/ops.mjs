@@ -119,6 +119,7 @@ Usage:
   pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --prepare-worktree
   pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --prepare-docker
   pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --execute --execute-docker
+  pnpm ops docker:validate -- --image node:22-bookworm --provider codex --require-command node,pnpm,git --docker-env CODEX_HOME
   pnpm ops dispatch -- --issue 123 --title "Docker slice" --source manual --override-reason "Solo Operator approved" --isolation-mode docker --docker-env CODEX_HOME --docker-volume codex-cache:/codex-cache
   pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --execute
   pnpm ops console -- --port 4173 --host 127.0.0.1
@@ -273,6 +274,70 @@ function dockerRunPlanForDispatch(artifact, { provider = "codex", liveProvider =
     volumes: docker.volumes || [],
     worktree_path: worktreePath,
     command: "docker",
+    args,
+    rendered_command: ["docker", ...args].join(" "),
+  };
+}
+
+function uniqueList(values = []) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function validateShellToken(value, label) {
+  const text = String(value || "");
+  if (!/^[A-Za-z0-9._-]+$/.test(text)) {
+    throw new Error(`${label} contains unsupported characters: ${text}`);
+  }
+  return text;
+}
+
+function providerRequiredCommand(provider) {
+  if (provider === "codex") {
+    return "codex";
+  }
+  if (provider === "claude") {
+    return "claude";
+  }
+  return "";
+}
+
+function dockerValidationScript({ commands = [], env = [] } = {}) {
+  const checks = [
+    "set -eu",
+    ...commands.map((command) => `command -v ${validateShellToken(command, "Required command")} >/dev/null`),
+    ...env.map((name) => `test -n "\${${validateShellToken(name, "Environment variable")}:-}"`),
+  ];
+  return checks.join(" && ");
+}
+
+function dockerValidationPlan({ image, provider = "", commands = [], env = [], volumes = [], network = "none" } = {}) {
+  const providerCommand = providerRequiredCommand(provider);
+  const requiredCommands = uniqueList([
+    ...commands.map((command) => validateShellToken(command, "Required command")),
+    ...(providerCommand ? [providerCommand] : []),
+  ]);
+  const envAllowlist = uniqueList(env.map((name) => validateShellToken(name, "Environment variable")));
+  const extraVolumes = uniqueList(volumes);
+  const args = [
+    "run",
+    "--rm",
+    "--network",
+    network || "none",
+    ...envAllowlist.flatMap((name) => ["-e", name]),
+    ...extraVolumes.flatMap((volume) => ["-v", volume]),
+    image,
+    "sh",
+    "-lc",
+    dockerValidationScript({ commands: requiredCommands, env: envAllowlist }),
+  ];
+
+  return {
+    image,
+    provider,
+    requiredCommands,
+    envAllowlist,
+    extraVolumes,
+    network: network || "none",
     args,
     rendered_command: ["docker", ...args].join(" "),
   };
@@ -2327,6 +2392,17 @@ function normalizeWriteSurface(value) {
     .filter(Boolean);
 }
 
+function splitCommaOrPipeList(value) {
+  if (!value) {
+    return [];
+  }
+
+  return String(value)
+    .split(/[|,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function globToRegExp(glob) {
   const escaped = String(glob || "")
     .replace(/\\/g, "/")
@@ -3138,6 +3214,79 @@ async function claimLocks(args) {
   if (stale.length > 0) {
     lines.push("Stale matched locks were not deleted here; use `pnpm ops reclaim-expired -- --apply --apply-lock-ref` so local dispatch state and remote refs move together.");
   }
+  process.stdout.write(`${lines.join("\n")}\n`);
+}
+
+async function dockerValidate(args) {
+  const image = readOption(args, "image", "node:22-bookworm");
+  const provider = readOption(args, "provider", "");
+  const requiredCommands = splitCommaOrPipeList(readOption(args, "require-command", "node,pnpm,git"));
+  const envAllowlist = uniqueList([
+    ...splitOptionList(readOption(args, "docker-env")),
+    ...splitOptionList(readOption(args, "require-env")),
+  ]);
+  const volumes = splitOptionList(readOption(args, "docker-volume"));
+  const network = readOption(args, "docker-network", "none");
+
+  if (!image) {
+    throw new Error("docker:validate requires --image.");
+  }
+
+  const missingEnv = envAllowlist.filter((name) => !process.env[name]);
+  if (missingEnv.length > 0) {
+    throw new Error(`Docker image validation failed before launch. Missing host env for allowlist: ${missingEnv.join(", ")}.`);
+  }
+
+  const dockerReadiness = await commandAvailable("docker");
+  if (!dockerReadiness.available) {
+    throw new Error(`Docker image validation failed before launch. Docker CLI unavailable: ${dockerReadiness.stderr || "not found"}`);
+  }
+
+  const plan = dockerValidationPlan({
+    image,
+    provider,
+    commands: requiredCommands,
+    env: envAllowlist,
+    volumes,
+    network,
+  });
+
+  let execution;
+  try {
+    execution = await runCommand(dockerReadiness.command || "docker", plan.args);
+  } catch (error) {
+    throw new Error(
+      [
+        "Docker image validation failed.",
+        `Image: ${plan.image}`,
+        `Command: ${plan.rendered_command}`,
+        error.stdout ? `stdout: ${error.stdout}` : "",
+        error.stderr ? `stderr: ${error.stderr}` : "",
+        error.message && !error.stderr ? error.message : "",
+      ].filter(Boolean).join("\n"),
+    );
+  }
+
+  const lines = [
+    "# Docker Image Validation",
+    "",
+    `Image: ${plan.image}`,
+    `Provider: ${plan.provider || "none"}`,
+    `Network: ${plan.network}`,
+    `Required commands: ${plan.requiredCommands.join(", ") || "none"}`,
+    `Env allowlist: ${plan.envAllowlist.join(", ") || "none"}`,
+    `Extra volumes: ${plan.extraVolumes.join(", ") || "none"}`,
+    `Docker command: ${plan.rendered_command}`,
+    `Status: passed`,
+  ];
+
+  if (execution.stdout) {
+    lines.push("", "## Probe stdout", "", execution.stdout.trim());
+  }
+  if (execution.stderr) {
+    lines.push("", "## Probe stderr", "", execution.stderr.trim());
+  }
+
   process.stdout.write(`${lines.join("\n")}\n`);
 }
 
@@ -4250,6 +4399,11 @@ async function main() {
 
   if (command === "reclaim-expired") {
     await reclaimExpired(args);
+    return;
+  }
+
+  if (command === "docker:validate") {
+    await dockerValidate(args);
     return;
   }
 

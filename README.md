@@ -25,6 +25,7 @@ pnpm qa
 `pnpm ops console -- --port 4173` launches a local artifact-first workflow console over Setup, Context, PRD, Graph, Execution, and Review.
 `pnpm ops run -- --execute --live-provider` defaults to Codex and can use Claude Code with `--provider claude` when that CLI is installed and authenticated.
 `pnpm ops run -- --prepare-docker` prints the Docker container boundary for a Docker-isolated dispatch. Add `--execute --execute-docker` after inspection to launch the rendered Docker command; Docker credentials and extra mounts are explicit via `--docker-env` and `--docker-volume`.
+`pnpm ops docker:validate -- --image node:22-bookworm --provider codex --require-command node,pnpm,git` runs a no-network container readiness probe for a proposed Docker execution image.
 `pnpm ops worktree-clean` previews stale unreferenced `.worktrees` cleanup; add `--apply` only when you want deletion.
 `pnpm verify:project` runs the repeatable readiness check: setup, tests, console smoke, GitHub auth, and Project export visibility.
 
@@ -82,7 +83,7 @@ Issue #13's approved product shape is now the documented contract:
 This scaffold deliberately stops before:
 
 - multi-agent orchestration
-- full in-container provider execution
+- production-grade Docker image and credential packaging
 - autonomous backlog processing
 - always-on distributed lock packaging and dashboards
 - memory synthesis loops

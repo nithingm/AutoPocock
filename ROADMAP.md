@@ -74,6 +74,7 @@ Execution lanes:
 - Current runner supports branch, worktree, guarded Docker isolation planning, and explicit Docker container launch.
 - Once the scheduler exists, default to worktree-first isolation.
 - Docker-isolated dispatches have an explicit image/workspace/network/env/volume contract, a `--prepare-docker` plan, and an explicit `--execute --execute-docker` launch path that runs the provider command inside the declared container boundary.
+- `pnpm ops docker:validate` runs a no-network readiness probe for proposed Docker execution images, required provider CLIs, and explicitly allowed credential environment variables before those images are used by live dispatches.
 - Provider-specific subagent execution belongs in a runner layer.
 - Runners must claim Dispatch Artifacts before execution.
 - Stale claims return to `queued` only with Solo Operator approval or future timeout policy.
@@ -108,6 +109,7 @@ Execution lanes:
 - `pnpm ops dispatch`: create audited manual dispatch artifacts, while scheduler-sourced dispatches are created by `schedule -- --dispatch`.
 - `pnpm ops claim`: local file-backed claiming uses an exclusive dispatch-artifact lock and re-reads state before mutation.
 - `pnpm ops run`: validate claimed dispatches, prepare worktrees, prepare Docker isolation plans, and execute through stub/live provider boundaries; Codex is the default live provider and Claude Code can be selected with `--provider claude`; Docker-isolated execution requires explicit `--execute-docker` approval after plan inspection.
+- `pnpm ops docker:validate`: validate a proposed Docker execution image with no network, required command checks, and explicit credential env allowlist checks.
 - `pnpm ops worktree-clean`: dry-run-first cleanup for stale unreferenced `.worktrees` directories; deletion requires `--apply`.
 - `pnpm ops review-prep`: validate Review Entry Gate inputs and generate advisory Review Prep when the gate passes.
 - `pnpm ops qa`: load issue, PR, handoff, completion, and review prep context from GitHub.
@@ -117,7 +119,7 @@ Execution lanes:
 
 - How much of GitHub Project view setup should be automated beyond the current report-first contract; Project creation and field creation now have explicit apply paths.
 - Additional provider adapters beyond Codex and Claude Code, if the product boundary expands to more CLIs or hosted runners.
-- Docker runtime policy is accepted in `docs/adr/2026-06-25-docker-runtime-policy.md`; future work should validate concrete hardened images and provider credential packages, not change the default safety boundary.
+- Docker runtime policy is accepted in `docs/adr/2026-06-25-docker-runtime-policy.md` and `pnpm ops docker:validate` now checks proposed images; remaining work is to run that probe against the actual hardened deployment images and provider credential packages.
 - How to package the distributed GitHub ref lock path for always-on multi-runner deployments beyond the landed `claim-locks` audit/cleanup command, including scheduler integration and operator dashboards.
 - External/user-level memory sync is intentionally outside the current product boundary; approved Durable Memory decisions stay repo-local unless a future explicit connector boundary is designed and approved.
 

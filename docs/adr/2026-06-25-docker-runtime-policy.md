@@ -26,3 +26,4 @@ Docker execution is explicit and inspectable:
 - Host credentials do not leak into containers by default.
 - Additional writable state is visible in dispatch JSON, Provider Run metadata, and the rendered command.
 - Production teams can bring hardened images and named volumes without changing the runner contract.
+- `pnpm ops docker:validate` checks proposed execution images with no network, validates required provider commands, and verifies explicitly allowed credential env vars are present before live Docker dispatch use.

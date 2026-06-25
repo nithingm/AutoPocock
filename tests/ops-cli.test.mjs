@@ -87,6 +87,7 @@ async function installFakeDocker(cwd) {
     `#!/usr/bin/env sh
 if [ "$1" = "--version" ]; then echo "Docker version 99.0.0"; exit 0; fi
 printf '%s\\n' "$*" >> "$DOCKER_LOG"
+if [ "$DOCKER_FAIL" = "1" ]; then echo "missing command" >&2; exit 1; fi
 echo "docker container ran"
 exit 0
 `,
@@ -100,6 +101,10 @@ if "%1"=="--version" (
   exit /b 0
 )
 echo %*>>"%DOCKER_LOG%"
+if "%DOCKER_FAIL%"=="1" (
+  echo missing command 1>&2
+  exit /b 1
+)
 echo docker container ran
 exit /b 0
 `,
@@ -113,6 +118,62 @@ exit /b 0
     },
   };
 }
+
+test("docker:validate runs an image readiness probe with required commands and env", async () => {
+  const cwd = await makeWorkspace();
+  const fakeDocker = await installFakeDocker(cwd);
+  const result = await runOps(cwd, [
+    "docker:validate",
+    "--image",
+    "node:22-bookworm",
+    "--provider",
+    "codex",
+    "--require-command",
+    "node,pnpm",
+    "--docker-env",
+    "CODEX_HOME",
+  ], {
+    env: {
+      ...fakeDocker.env,
+      CODEX_HOME: path.join(cwd, ".codex"),
+    },
+  });
+  const dockerLog = await readFile(fakeDocker.logPath, "utf8");
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /# Docker Image Validation/);
+  assert.match(result.stdout, /Image: node:22-bookworm/);
+  assert.match(result.stdout, /Provider: codex/);
+  assert.match(result.stdout, /Required commands: node, pnpm, codex/);
+  assert.match(result.stdout, /Env allowlist: CODEX_HOME/);
+  assert.match(result.stdout, /Status: passed/);
+  assert.match(dockerLog, /run --rm --network none -e CODEX_HOME node:22-bookworm sh -lc/);
+  assert.match(dockerLog, /command -v node/);
+  assert.match(dockerLog, /command -v pnpm/);
+  assert.match(dockerLog, /command -v codex/);
+  assert.match(dockerLog, /test -n .*CODEX_HOME:-/);
+});
+
+test("docker:validate fails when the image readiness probe fails", async () => {
+  const cwd = await makeWorkspace();
+  const fakeDocker = await installFakeDocker(cwd);
+  const result = await runOps(cwd, [
+    "docker:validate",
+    "--image",
+    "node:22-bookworm",
+    "--require-command",
+    "node",
+  ], {
+    env: {
+      ...fakeDocker.env,
+      DOCKER_FAIL: "1",
+    },
+  });
+
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /Docker image validation failed/);
+  assert.match(result.stderr, /missing command/);
+});
 
 test("github:export refuses to run without a project reference", async () => {
   const cwd = await makeWorkspace();

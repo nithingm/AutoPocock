@@ -111,6 +111,7 @@ Observed:
 - `github:init -- --apply --create-project` is now a guarded fresh-setup path that refuses duplicate Project creation when a Project reference exists
 - `github:init -- --apply --create-project-fields` created the missing configured optional Project fields, while continuing to report existing drift without rewriting fields
 - `run -- --prepare-docker` exposes Docker image/workspace/network/env/volume isolation plans, and `run -- --execute --execute-docker` launches the rendered container command after explicit approval
+- `docker:validate` probes proposed Docker execution images with no network and checks required commands, provider CLIs, and explicit credential env allowlists before live use
 - `claim -- --apply-tracker` can write the runner lease to the GitHub Project `Runner` field when a scheduler-created dispatch retained its `project_item_id`
 - claims now record explicit lease expiry metadata, and `claim-status` uses `expires_at` when present before falling back to max-age inspection
 - `reclaim -- --apply-tracker` can clear that Project `Runner` lease during approved reclaim recovery
@@ -136,7 +137,7 @@ The core landing and tracker reconciliation are complete. Remaining work is prod
 
 1. GitHub Project views are now inspected and drift-reported through GraphQL; creation and renaming remain manual because GitHub CLI/GraphQL do not expose ProjectV2 view mutations.
 2. Distributed claim locking now has an opt-in GitHub ref CAS path plus `claim-locks` audit/orphan cleanup; remaining deployment work is scheduler integration and always-on operator dashboards.
-3. Validate concrete hardened Docker images and provider credential packages for the deployment environment.
+3. Run `pnpm ops docker:validate` against the concrete hardened Docker images and provider credential packages chosen for deployment.
 4. Re-run full local tests plus strict live tracker verification after any follow-up updates.
 
 ## Continuation Brief
