@@ -9,7 +9,9 @@ Status: Resolved on 2026-06-25.
 
 The local repo was ready to reconcile the GitHub Project board, but the authenticated GitHub CLI token at the time could not mutate Project items. `read:project` was enough for export/read checks; reconciliation needed the `project` scope.
 
-Resolution update: the Solo Operator refreshed Project access, added issues `#45` through `#55` to Project 1, and reran `pnpm verify:project -- --strict-external`. The strict verifier passed for local readiness, GitHub Project read path, Project write scope, and issue `#45` Project visibility.
+Resolution update: the Solo Operator refreshed Project access, added issues `#45` through `#55` to Project 1, and reran `pnpm verify:project -- --strict-external`. The strict verifier passed for local readiness, GitHub Project read path, Project write scope, and issue `#45` present in the active Project export at that time.
+
+Post-merge update: PR `#56` landed on `origin/main`, issues `#44` through `#55` were closed, and Project items `#44` through `#55` were set to Done/Closed. The strict verifier now treats issue `#45` as reconciled when it is confirmed closed and absent from the active non-Done queue.
 
 Observed error:
 
@@ -80,11 +82,16 @@ Run:
 pnpm ops github:export -- --issue 45
 ```
 
-Expected after reconciliation:
+Expected after initial reconciliation:
 
 - issue `#45` is present in the configured Project export
 - the export no longer treats closed issues `#1` through `#32` as workflow-active solely because `Execution Stage` is empty
 
+Expected after post-merge closure:
+
+- active queue export may contain 0 non-Done items
+- issue `#45` should be confirmed `CLOSED` by `gh issue view 45 --json state`
+
 ## Boundary
 
-Do not close `#45` through `#55` from this step. Adding them to the Project only restores tracker visibility. Closing those issues still requires review of the local source/test/docs evidence and an intentional PR or merge decision.
+This step did not close issues by itself. Adding them to the Project only restored tracker visibility. Issue closure happened later from landed PR `#56` evidence and an intentional merge decision.

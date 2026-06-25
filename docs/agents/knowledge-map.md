@@ -9,7 +9,7 @@ This is the operator-facing map of where the project's knowledge lives and how t
 
 AutoPocock is no longer just a manual repo template. The accepted manual operating system is present, documented, and test-backed in the current working tree. On top of that, the local tree now contains a broader provider/DAG/Ralph orchestration layer with test coverage.
 
-The automation layer is now landed on `origin/main` through PR `#56`. It is committed, merged, CI-backed, and reconciled far enough for Project visibility.
+The automation layer is now landed on `origin/main` through PR `#56`. It is committed, merged, CI-backed, and reconciled in GitHub Issues and Project fields.
 
 ## Read These First
 
@@ -105,30 +105,29 @@ pnpm smoke:console
 
 Observed:
 
-- `pnpm verify:project -- --strict-external` passes for local readiness, Project read path, Project write scope, and issue `#45` visibility
+- `pnpm verify:project -- --strict-external` passes for local readiness, Project read path, Project write scope, and issue `#45` closed terminal state
 - local setup reports git, node, pnpm, GitHub CLI/auth, Codex provider, and workflow directories ready
 - GitHub auth is live for account `nithingm` and has sufficient Project access for the strict verifier
 - GitHub bootstrap remains dry-run-first and reports drift instead of destructive mutation
-- issue `#45` is visible in the configured GitHub Project export after issues `#45` through `#55` were added
+- issue `#45` is confirmed closed and absent from the active non-Done Project export after issues `#44` through `#55` were closed and reconciled
 - the workflow console can serve the current workspace state on an ephemeral local port and close cleanly
-- PR `#56` exists and GitHub Actions CI is green for frozen install, `pnpm test`, and `pnpm smoke:console`
+- PR `#56` exists, is merged, and GitHub Actions CI is green for frozen install, `pnpm test`, and `pnpm smoke:console`
 
 ## Trust Rules
 
 - Use `origin/main` when you need the stable, landed manual OS baseline or the provider/DAG/Ralph orchestration work.
 - Use GitHub Issues for live issue existence, ownership, and eventual stage movement.
-- Do not use the GitHub Project board as the sole source of truth for implementation completeness; use it for restored tracker visibility.
-- Do not close `#45` through `#55` based only on local completion reports. Review the corresponding source/test/docs evidence first.
+- Do not use the GitHub Project board as the sole source of truth for implementation completeness; use landed source, tests, durable artifacts, and CI as the implementation authority.
+- Issues `#44` through `#55` are closed based on PR `#56`, merge commit `06ac64c`, local strict verification, and green `main` CI.
 - Treat old `.ai/` runtime records as execution history, not current authority.
 - Keep runtime output out of commits unless it is intentionally promoted as evidence.
 
-## Current Open Work
+## Optional Follow-Up
 
-The work left is mostly operational hardening and reconciliation:
+The core landing and tracker reconciliation are complete. Remaining work is optional cleanup:
 
 1. Decide whether intentionally unstaged scratch/demo artifacts should be deleted, ignored, or promoted separately.
 2. Re-run full local tests plus strict live tracker verification after any follow-up updates.
-3. Move issue state only after landed evidence supports each transition.
 
 ## Continuation Brief
 

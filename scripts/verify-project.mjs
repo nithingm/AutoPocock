@@ -68,7 +68,8 @@ const checks = [
   await runCommand("full test suite", "pnpm", ["test"]),
   await runCommand("workflow console smoke", "pnpm", ["smoke:console"]),
   await runCommand("GitHub auth status", "gh", ["auth", "status"]),
-  await runCommand("GitHub Project export visibility for #45", "pnpm", ["ops", "github:export", "--", "--issue", "45"]),
+  await runCommand("GitHub Project export/read path for #45", "pnpm", ["ops", "github:export", "--", "--issue", "45"]),
+  await runCommand("GitHub issue #45 state", "gh", ["issue", "view", "45", "--json", "state"]),
 ];
 
 process.stdout.write("# Project Verification\n\n");
@@ -100,8 +101,10 @@ if (summary.projectWriteReady) {
 
 if (summary.requestedIssueVisible) {
   process.stdout.write("- Issue #45 Project visibility: present\n");
+} else if (summary.requestedIssueAbsent && summary.requestedIssueClosed) {
+  process.stdout.write("- Issue #45 terminal state: closed and absent from active Project queue\n");
 } else if (summary.requestedIssueAbsent) {
-  process.stdout.write("- Issue #45 Project visibility: absent from configured Project export\n");
+  process.stdout.write("- Issue #45 Project visibility: absent from configured Project export and not confirmed closed\n");
 } else {
   process.stdout.write("- Issue #45 Project visibility: unknown\n");
 }

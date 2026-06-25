@@ -18,8 +18,9 @@ External tracker state:
 
 - GitHub auth is live for `nithingm`
 - strict Project verification reports write scope present
-- issues `#45` through `#55` have been added to Project 1
-- `pnpm ops github:export -- --issue 45` reports that `#45` is visible in the configured Project export
+- issues `#44` through `#55` are closed
+- Project items `#44` through `#55` are set to Done/Closed
+- `pnpm ops github:export -- --issue 45` writes a queue snapshot with 0 active non-Done items because `#45` is closed and reconciled
 
 Latest local verification:
 
@@ -33,12 +34,12 @@ pnpm smoke:console
 
 Observed:
 
-- strict project verification passed for local readiness, Project read path, Project write scope, and issue `#45` visibility
+- strict project verification passed for local readiness, Project read path, Project write scope, and issue `#45` closed terminal state
 - setup ready
 - 179 tests passed
-- export wrote `.ai/queue.json` and found issue `#45` in the configured Project
+- export wrote `.ai/queue.json` with 0 active non-Done items
 - workflow console smoke passed on an ephemeral local port and closed cleanly
-- GitHub Actions CI passed for PR `#56`
+- GitHub Actions CI passed for PR `#56` and for `main` after the merge
 
 ## Committed Review Surface
 
@@ -306,8 +307,7 @@ Likely files:
 ## Commit Guardrails
 
 - Keep `.ai/provider-runs/`, `.ai/ralph-runs/`, `.ai/queue.json`, and `.ai/tmp-*.mjs` out of normal commits.
-- Do not close `#45` through `#55` just because local tests pass.
-- Do not close `#45` through `#55` just because Project visibility is restored.
+- Issues `#44` through `#55` are already closed from landed PR `#56` evidence.
 - Re-run `pnpm test` after each slice.
 - Run `pnpm verify:project -- --strict-external` after each slice when the external checks should be reported with the local readiness state.
 - Re-run `pnpm ops github:export -- --issue 45` after tracker-affecting changes.

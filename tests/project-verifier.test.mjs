@@ -5,6 +5,7 @@ import {
   exportReportsIssueAbsent,
   hasProjectReadScope,
   hasProjectWriteScope,
+  issueStateIsClosed,
   parseTokenScopes,
   summarizeProjectVerification,
 } from "../scripts/lib/project-verifier.mjs";
@@ -33,6 +34,7 @@ test("project verifier recognizes requested issue visibility and absence message
     exportReportsIssueAbsent(passed("Requested issue #45 was not found in the exported queue snapshot."), "45"),
     true,
   );
+  assert.equal(issueStateIsClosed(passed('{"state":"CLOSED"}')), true);
 });
 
 test("project verifier exits successfully for local readiness with HITL external reconciliation", () => {
@@ -43,6 +45,7 @@ test("project verifier exits successfully for local readiness with HITL external
       passed(),
       passed("Token scopes: 'read:project', 'repo'"),
       passed("Requested issue #45 was not found in the exported queue snapshot."),
+      passed('{"state":"OPEN"}'),
     ],
     issue: "45",
   });
@@ -62,6 +65,7 @@ test("project verifier strict external mode fails until write scope and visibili
       passed(),
       passed("Token scopes: 'read:project', 'repo'"),
       passed("Requested issue #45 was not found in the exported queue snapshot."),
+      passed('{"state":"OPEN"}'),
     ],
     issue: "45",
     strictExternal: true,
@@ -80,6 +84,7 @@ test("project verifier strict external mode passes when Project reconciliation i
       passed(),
       passed("Token scopes: 'project', 'repo'"),
       passed("Requested issue #45 is present in the exported queue snapshot."),
+      passed('{"state":"OPEN"}'),
     ],
     issue: "45",
     strictExternal: true,
@@ -88,5 +93,28 @@ test("project verifier strict external mode passes when Project reconciliation i
   assert.equal(summary.exitCode, 0);
   assert.equal(summary.projectWriteReady, true);
   assert.equal(summary.requestedIssueVisible, true);
+  assert.match(summary.finalLine, /External Project reconciliation is ready/);
+});
+
+test("project verifier strict external mode passes when requested issue is closed and absent from active queue", () => {
+  const summary = summarizeProjectVerification({
+    checks: [
+      passed(),
+      passed(),
+      passed(),
+      passed("Token scopes: 'project', 'repo'"),
+      passed("Requested issue #45 was not found in the exported queue snapshot."),
+      passed('{"state":"CLOSED"}'),
+    ],
+    issue: "45",
+    strictExternal: true,
+  });
+
+  assert.equal(summary.exitCode, 0);
+  assert.equal(summary.projectWriteReady, true);
+  assert.equal(summary.requestedIssueVisible, false);
+  assert.equal(summary.requestedIssueAbsent, true);
+  assert.equal(summary.requestedIssueClosed, true);
+  assert.equal(summary.requestedIssueTerminal, true);
   assert.match(summary.finalLine, /External Project reconciliation is ready/);
 });

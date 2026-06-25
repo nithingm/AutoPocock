@@ -34,20 +34,27 @@ export function exportReportsIssueAbsent(exportResult, issue) {
     || output.includes(`Requested issue ${issue} was not found`);
 }
 
+export function issueStateIsClosed(issueResult) {
+  const output = combinedOutput(issueResult);
+  return /"state"\s*:\s*"CLOSED"/i.test(output) || /\bstate:\s*CLOSED\b/i.test(output);
+}
+
 export function summarizeProjectVerification({ checks, issue = "45", strictExternal = false }) {
-  const [setup, tests, consoleSmoke, auth, exportCheck] = checks;
+  const [setup, tests, consoleSmoke, auth, exportCheck, issueStateCheck = { status: "passed", stdout: "", stderr: "" }] = checks;
   const localFailures = [setup, tests, consoleSmoke].filter((result) => result.status !== "passed");
-  const externalFailures = [auth, exportCheck].filter((result) => result.status !== "passed");
+  const externalFailures = [auth, exportCheck, issueStateCheck].filter((result) => result.status !== "passed");
   const projectWriteReady = auth.status === "passed" && hasProjectWriteScope(auth);
   const projectReadReady = auth.status === "passed" && hasProjectReadScope(auth);
   const requestedIssueVisible = exportCheck.status === "passed" && exportContainsRequestedIssue(exportCheck, issue);
   const requestedIssueAbsent = exportCheck.status === "passed" && exportReportsIssueAbsent(exportCheck, issue);
+  const requestedIssueClosed = issueStateCheck.status === "passed" && issueStateIsClosed(issueStateCheck);
+  const requestedIssueTerminal = requestedIssueVisible || (requestedIssueAbsent && requestedIssueClosed);
 
   const strictFailures = [
     ...localFailures,
     ...externalFailures,
     ...(projectWriteReady ? [] : [{ label: "GitHub Project write scope" }]),
-    ...(requestedIssueVisible ? [] : [{ label: `Issue #${issue} Project visibility` }]),
+    ...(requestedIssueTerminal ? [] : [{ label: `Issue #${issue} Project active visibility or closed terminal state` }]),
   ];
 
   let exitCode = 0;
@@ -58,7 +65,7 @@ export function summarizeProjectVerification({ checks, issue = "45", strictExter
   } else if (localFailures.length > 0 || externalFailures.length > 0) {
     exitCode = 1;
     finalLine = "Project verification failed before external reconciliation.";
-  } else if (!projectWriteReady || !requestedIssueVisible) {
+  } else if (!projectWriteReady || !requestedIssueTerminal) {
     finalLine = "Project verification passed for local readiness. External Project reconciliation remains HITL.";
   } else {
     finalLine = "Project verification passed for local readiness. External Project reconciliation is ready.";
@@ -71,6 +78,8 @@ export function summarizeProjectVerification({ checks, issue = "45", strictExter
     projectReadReady,
     requestedIssueVisible,
     requestedIssueAbsent,
+    requestedIssueClosed,
+    requestedIssueTerminal,
     strictFailures,
     exitCode,
     finalLine,

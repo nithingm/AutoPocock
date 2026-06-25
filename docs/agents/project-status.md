@@ -49,11 +49,11 @@ pnpm smoke:console
 
 Observed result:
 
-- `verify:project -- --strict-external` reports local readiness passed, GitHub Project read path passed, Project write scope present, and issue `#45` visible.
+- `verify:project -- --strict-external` reports local readiness passed, GitHub Project read path passed, Project write scope present, and issue `#45` in a closed terminal state outside the active queue.
 - `setup` reports git, node, pnpm, GitHub CLI/auth, Codex provider, and workflow directories ready.
 - `gh auth status` reports account `nithingm` with Project access sufficient for the strict verifier.
 - `github:init` remains dry-run-first and reports existing label drift without mutating GitHub.
-- `github:export -- --issue 45` writes a queue snapshot and can see issue `#45` in the configured Project.
+- `github:export -- --issue 45` writes a queue snapshot with 0 active non-Done items; issue `#45` is absent because it is closed and reconciled to Done.
 - the workflow console starts on an ephemeral local port, serves `/`, returns `/api/state`, and closes cleanly.
 - GitHub Actions CI on PR `#56` runs `pnpm install --frozen-lockfile`, `pnpm test`, and `pnpm smoke:console`; the latest run is green.
 
@@ -63,7 +63,7 @@ Current branch:
 
 - `main`
 - aligned with `origin/main`
-- latest commit: `06ac64c Land automation workflow layer`
+- latest commits include the PR `#56` merge and post-merge status/verifier updates
 - merged PR: `https://github.com/nithingm/AutoPocock/pull/56`
 
 The landed baseline includes the manual OS, original GitHub-backed workflow hardening, automation-layer implementation, tests, CI workflow, and durable status/orientation artifacts.
@@ -108,11 +108,11 @@ Evidence is recorded in `docs/agents/manual-acceptance-checklist.md`, with cover
 
 Live GitHub Issues currently show:
 
-- 43 closed issues
-- 12 open issues
+- 55 closed issues
+- 0 open issues
 - PR `#56` merged for the automation layer
 
-The open issues are `#44` through `#55`:
+Issues closed after PR `#56` landed:
 
 - `#44` Topologically Sorted DAG Planning and Graph-Driven Ralph Loop Orchestration
 - `#45` Add PRD Tightness Validation Before DAG Compilation
@@ -127,9 +127,11 @@ The open issues are `#44` through `#55`:
 - `#54` Add Branch-Local Pause and Shared-Foundation Full-Run Freeze Rules
 - `#55` Orchestrate Multi-Stage Single Runs From Connected Wave Bundles
 
-The GitHub Project board has been reconciled far enough for tracker visibility. Issues `#45` through `#55` were added to Project 1 on 2026-06-25, and strict verification confirms issue `#45` is visible through the configured Project export.
+The GitHub Project board has been reconciled for tracker closure. Issues `#44` through `#55` are closed, and their Project fields are set to Done/Closed.
 
 The closed-issue Project field reconciliation for issues `#1` through `#32` was run before the open issue additions. Treat that as an applied reconciliation step, but continue to validate scheduler/export behavior through normal command output after source cleanup.
+
+The active queue export now reports 0 non-Done items. Strict verification treats issue `#45` as reconciled when it is absent from the active queue and confirmed closed.
 
 The former Project-scope HITL task is resolved. The recovery record remains at `docs/agents/hitl/2026-06-25-github-project-scope-needed.md`.
 
@@ -143,17 +145,16 @@ Local completion reports exist for:
 - `#54`
 - `#55`
 
-Those reports claim the later wave slices are implemented and tested locally. The test suite and PR `#56` support that the relevant contracts exist, but issue state should still move only after review.
+Those reports claim the later wave slices are implemented and tested locally. The test suite, PR `#56`, merge commit `06ac64c`, and green `main` CI support that the relevant contracts landed.
 
 The local Ralph run state is stale: it still records `#45` as `in_progress` and later issues as `pending`. Treat that runtime state as an old execution record until it is intentionally regenerated or reconciled.
 
-## Remaining Work
+## Optional Follow-Up
 
-The next work is post-merge tracker discipline, not broad feature invention.
+The core landing and tracker reconciliation are complete. Remaining cleanup is local scratch/demo hygiene, not broad feature invention.
 
 1. Decide whether any intentionally unstaged scratch/demo artifacts should be deleted, ignored, or promoted in a later artifact-only PR.
-2. Update issue states only after the corresponding landed evidence is reviewed.
-3. Run a live end-to-end validation before moving issue states:
+2. Run a live end-to-end validation after any follow-up changes:
    - `pnpm verify:project -- --strict-external`
    - `pnpm ops setup`
    - `pnpm ops github:export -- --issue <target>`
@@ -165,4 +166,4 @@ The next work is post-merge tracker discipline, not broad feature invention.
 
 Use `origin/main` when you need the stable manual OS or the landed provider/DAG/Ralph orchestration work.
 
-Do not use the live GitHub Project board as the sole source of truth for implementation completeness. Project visibility is now restored, but the automation layer still needs source/test/docs review before issue state should move.
+Do not use the live GitHub Project board as the sole source of truth for implementation completeness. The board is reconciled, but source, tests, durable artifacts, and CI remain the implementation authority.
