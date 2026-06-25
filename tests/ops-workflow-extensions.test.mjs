@@ -83,6 +83,7 @@ if [ "$1" = "project" ] && [ "$2" = "field-list" ]; then echo '{"fields":[{"id":
 if [ "$1" = "project" ] && [ "$2" = "item-edit" ]; then exit 0; fi
 if [ "$1" = "api" ] && [ "$2" = "repos/nithingm/AutoPocock" ]; then echo '{"default_branch":"main"}'; exit 0; fi
 if [ "$1" = "api" ] && [ "$2" = "repos/nithingm/AutoPocock/git/ref/heads/main" ]; then echo '{"object":{"sha":"fake-main-sha"}}'; exit 0; fi
+if [ "$1" = "api" ] && [ "$2" = "repos/nithingm/AutoPocock/git/matching-refs/heads/autopocock-locks" ]; then echo '[{"ref":"refs/heads/autopocock-locks/dispatch-active-lock","object":{"sha":"active-sha"}},{"ref":"refs/heads/autopocock-locks/dispatch-orphan-lock","object":{"sha":"orphan-sha"}}]'; exit 0; fi
 if [ "$1" = "api" ] && [ "$2" = "repos/nithingm/AutoPocock/git/refs" ]; then if [ "$GH_CREATE_REF_FAIL" = "1" ]; then echo "Reference already exists" >&2; exit 1; fi; echo '{"ref":"refs/heads/autopocock-locks/dispatch-claim-lock"}'; exit 0; fi
 if [ "$1" = "api" ] && [ "$2" = "-X" ] && [ "$3" = "DELETE" ]; then exit 0; fi
 if [ "$1" = "issue" ] && [ "$2" = "create" ]; then echo "https://github.com/example/repo/issues/999"; exit 0; fi
@@ -121,6 +122,10 @@ if "%1"=="api" if "%2"=="repos/nithingm/AutoPocock" (
 )
 if "%1"=="api" if "%2"=="repos/nithingm/AutoPocock/git/ref/heads/main" (
   echo {"object":{"sha":"fake-main-sha"}}
+  exit /b 0
+)
+if "%1"=="api" if "%2"=="repos/nithingm/AutoPocock/git/matching-refs/heads/autopocock-locks" (
+  echo [{"ref":"refs/heads/autopocock-locks/dispatch-active-lock","object":{"sha":"active-sha"}},{"ref":"refs/heads/autopocock-locks/dispatch-orphan-lock","object":{"sha":"orphan-sha"}}]
   exit /b 0
 )
 if "%1"=="api" if "%2"=="repos/nithingm/AutoPocock/git/refs" if "%GH_CREATE_REF_FAIL%"=="1" (
@@ -1363,6 +1368,76 @@ test("reclaim --apply-lock-ref releases the GitHub claim ref", async () => {
   assert.equal(artifact.claim_history[0].distributed_lock.ref, "refs/heads/autopocock-locks/dispatch-reclaim-lock");
   assert.match(result.stdout, /Released distributed claim lock refs\/heads\/autopocock-locks\/dispatch-reclaim-lock/);
   assert.match(ghLog, /api -X DELETE repos\/nithingm\/AutoPocock\/git\/refs\/heads\/autopocock-locks\/dispatch-reclaim-lock/);
+});
+
+test("claim-locks reports remote GitHub lock refs and deletes only orphaned refs with approval", async () => {
+  const cwd = await makeWorkspace({
+    github: {
+      owner: "nithingm",
+      repo: "AutoPocock",
+      projectNumber: "1",
+    },
+  });
+  const fakeGh = await installFakeGh(cwd);
+  const dispatchPath = path.join(cwd, "docs", "agents", "dispatches", "dispatch-active-lock.json");
+  await writeFile(
+    dispatchPath,
+    `${JSON.stringify(
+      {
+        dispatch_id: "dispatch-active-lock",
+        issue_id: "#50",
+        title: "Active lock proof",
+        status: "claimed",
+        forbidden_actions: ["merge PR"],
+        expected_branch: "agent/50-active-lock-proof",
+        isolation_mode: "worktree",
+        worktree_path: path.join(cwd, ".worktrees", "50-active-lock-proof"),
+        handoff_artifact: "docs/agents/handoffs/50.md",
+        completion_report_target: "docs/agents/completions/dispatch-active-lock.md",
+        claim: {
+          claimed_by: "runner-a",
+          claimed_at: "2026-06-25T00:00:00.000Z",
+          lease_hours: 24,
+          expires_at: "2999-06-25T00:00:00.000Z",
+          isolation_mode: "worktree",
+          distributed_lock: {
+            provider: "github-ref",
+            ref: "refs/heads/autopocock-locks/dispatch-active-lock",
+            owner: "nithingm",
+            repo: "AutoPocock",
+          },
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const dryRun = await runOps(cwd, ["claim-locks"], {
+    env: fakeGh.env,
+  });
+  assert.equal(dryRun.code, 0, dryRun.stderr);
+  assert.match(dryRun.stdout, /Remote lock refs: 2/);
+  assert.match(dryRun.stdout, /active: refs\/heads\/autopocock-locks\/dispatch-active-lock -> dispatch-active-lock/);
+  assert.match(dryRun.stdout, /orphaned: refs\/heads\/autopocock-locks\/dispatch-orphan-lock/);
+  assert.match(dryRun.stdout, /No remote lock refs were deleted/);
+
+  const apply = await runOps(cwd, [
+    "claim-locks",
+    "--apply",
+    "--approved-by",
+    "solo-operator",
+    "--reason",
+    "Remove abandoned lock refs",
+  ], {
+    env: fakeGh.env,
+  });
+  const ghLog = await readFile(fakeGh.logPath, "utf8");
+
+  assert.equal(apply.code, 0, apply.stderr);
+  assert.match(apply.stdout, /Deleted orphaned lock refs: 1/);
+  assert.match(ghLog, /api -X DELETE repos\/nithingm\/AutoPocock\/git\/refs\/heads\/autopocock-locks\/dispatch-orphan-lock/);
+  assert.doesNotMatch(ghLog, /DELETE repos\/nithingm\/AutoPocock\/git\/refs\/heads\/autopocock-locks\/dispatch-active-lock/);
 });
 
 test("reclaim-expired --apply-tracker clears expired runner leases from the GitHub Project", async () => {

@@ -129,6 +129,8 @@ The claim implementation is file-backed and locally locked:
 - `pnpm ops claim -- --apply-tracker` writes the claimed runner into the GitHub Project `Runner` field when the dispatch artifact has `project_item_id`.
 - `pnpm ops claim -- --apply-lock-ref` creates an atomic GitHub branch ref under `refs/heads/autopocock-locks/` before local mutation; duplicate ref creation fails the claim and leaves the dispatch queued.
 - `pnpm ops claim-status` reports claim age, lease expiry, and whether the claim appears stale.
+- `pnpm ops claim-locks` lists remote GitHub lock refs, matches them to local claimed dispatches, and reports active, stale, and orphaned locks.
+- `pnpm ops claim-locks -- --apply --approved-by <operator> --reason "<reason>"` deletes orphaned remote lock refs only; matched stale claims should be reclaimed through `reclaim-expired --apply-lock-ref` so local state and remote refs stay aligned.
 - `pnpm ops reclaim` returns a claimed dispatch to `queued` only with explicit Solo Operator approval and a recorded reason.
 - `pnpm ops reclaim -- --apply-tracker` clears the GitHub Project `Runner` field when the dispatch artifact has `project_item_id`.
 - `pnpm ops reclaim -- --apply-lock-ref` deletes the recorded GitHub lock ref during approved recovery.

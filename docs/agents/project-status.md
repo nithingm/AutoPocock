@@ -158,7 +158,7 @@ The local Ralph run state is stale: it still records `#45` as `in_progress` and 
 The core landing and tracker reconciliation are complete. Remaining work is product hardening beyond the current local prototype:
 
 1. GitHub Project view setup is inspectable through GraphQL, including missing-view and name-drift reports. Creation and renaming remain manual because GitHub CLI/GraphQL do not expose ProjectV2 view mutations.
-2. Package the opt-in GitHub ref distributed lock path for always-on multi-runner operations, including retention policy and dashboards for abandoned lock refs.
+2. Package the opt-in GitHub ref distributed lock path beyond the landed `claim-locks` audit/orphan cleanup command: scheduler integration, continuous monitoring, and operator dashboards.
 3. Validate concrete hardened Docker images and provider credential packages for the deployment environment.
 4. Add more provider adapters only when a concrete provider boundary is needed beyond Codex and Claude Code.
 5. Run a live end-to-end validation after any follow-up changes:

@@ -118,7 +118,7 @@ Execution lanes:
 - How much of GitHub Project view setup should be automated beyond the current report-first contract; Project creation and field creation now have explicit apply paths.
 - Additional provider adapters beyond Codex and Claude Code, if the product boundary expands to more CLIs or hosted runners.
 - Docker runtime policy is accepted in `docs/adr/2026-06-25-docker-runtime-policy.md`; future work should validate concrete hardened images and provider credential packages, not change the default safety boundary.
-- How to package the distributed GitHub ref lock path for always-on multi-runner deployments, including retention policy and operational dashboards for abandoned lock refs.
+- How to package the distributed GitHub ref lock path for always-on multi-runner deployments beyond the landed `claim-locks` audit/cleanup command, including scheduler integration and operator dashboards.
 - External/user-level memory sync is intentionally outside the current product boundary; approved Durable Memory decisions stay repo-local unless a future explicit connector boundary is designed and approved.
 
 ## Locked GitHub Bootstrap Decisions

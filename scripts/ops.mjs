@@ -96,6 +96,8 @@ Usage:
   pnpm ops claim -- --dispatch docs/agents/dispatches/dispatch-id.json --claimed-by runner-name --apply-tracker
   pnpm ops claim -- --dispatch docs/agents/dispatches/dispatch-id.json --claimed-by runner-name --apply-lock-ref
   pnpm ops claim-status -- --dispatch docs/agents/dispatches/dispatch-id.json --max-age-hours 24
+  pnpm ops claim-locks
+  pnpm ops claim-locks -- --apply --approved-by solo-operator --reason "Remove abandoned lock refs"
   pnpm ops reclaim -- --dispatch docs/agents/dispatches/dispatch-id.json --approved-by solo-operator --reason "Runner abandoned work"
   pnpm ops reclaim -- --dispatch docs/agents/dispatches/dispatch-id.json --approved-by solo-operator --reason "Runner abandoned work" --apply-tracker
   pnpm ops reclaim-expired -- --max-age-hours 24
@@ -2060,6 +2062,61 @@ async function releaseGitHubClaimLock({ config, args, artifact }) {
   return lock;
 }
 
+async function listGitHubClaimLockRefs({ config, args }) {
+  await ensureGhReady("claim-locks");
+  const { owner, repo } = gitHubRepoRef(config, args, "claim-locks");
+  const result = await runGh(["api", `repos/${owner}/${repo}/git/matching-refs/heads/autopocock-locks`]);
+  const refs = JSON.parse(result.stdout || "[]");
+  return {
+    owner,
+    repo,
+    refs: Array.isArray(refs) ? refs : [],
+  };
+}
+
+async function inspectGitHubClaimLocks({ config, args, maxAgeHours }) {
+  const remote = await listGitHubClaimLockRefs({ config, args });
+  const localLocks = new Map();
+
+  for (const { fullPath, artifact } of await listDispatchArtifacts()) {
+    const lock = artifact?.claim?.distributed_lock;
+    if (lock?.provider !== "github-ref" || !lock.ref) {
+      continue;
+    }
+
+    localLocks.set(lock.ref, {
+      fullPath,
+      artifact,
+      inspection: inspectClaimAge(artifact, maxAgeHours),
+    });
+  }
+
+  return remote.refs.map((entry) => {
+    const ref = String(entry.ref || "");
+    const local = localLocks.get(ref);
+    if (!local) {
+      return {
+        ref,
+        sha: entry.object?.sha || "",
+        status: "orphaned",
+        artifact: null,
+        fullPath: "",
+        stale: false,
+      };
+    }
+
+    const active = local.artifact?.status === "claimed" && local.artifact?.claim;
+    return {
+      ref,
+      sha: entry.object?.sha || "",
+      status: active ? (local.inspection.stale ? "stale" : "active") : "orphaned",
+      artifact: local.artifact,
+      fullPath: local.fullPath,
+      stale: Boolean(local.inspection.stale),
+    };
+  });
+}
+
 async function gitHubExport(args) {
   const config = await loadJson(".ai/ops.config.json");
   const project = configuredProjectRef(config, args);
@@ -3017,6 +3074,69 @@ async function reclaimExpired(args) {
   lines.push("", `Applied expired-claim enforcement for ${reclaimedArtifacts.length} dispatch artifact(s).`);
   if (releasedLocks.length > 0) {
     lines.push(`Released distributed claim locks for ${releasedLocks.length} dispatch artifact(s).`);
+  }
+  process.stdout.write(`${lines.join("\n")}\n`);
+}
+
+async function claimLocks(args) {
+  const apply = args.includes("--apply");
+  const approvedBy = readOption(args, "approved-by");
+  const reason = readOption(args, "reason");
+  const maxAgeHours = parsePositiveNumber(readOption(args, "max-age-hours", "24"), 24, "claim-locks --max-age-hours");
+  const config = await loadJson(".ai/ops.config.json");
+  const { owner, repo } = gitHubRepoRef(config, args, "claim-locks");
+
+  if (apply && !approvedBy) {
+    throw new Error("claim-locks -- --apply requires --approved-by.");
+  }
+
+  if (apply && !reason) {
+    throw new Error("claim-locks -- --apply requires --reason.");
+  }
+
+  const inspection = await inspectGitHubClaimLocks({ config, args, maxAgeHours });
+  const orphaned = inspection.filter((lock) => lock.status === "orphaned");
+  const active = inspection.filter((lock) => lock.status === "active");
+  const stale = inspection.filter((lock) => lock.status === "stale");
+  const lines = [
+    "# Distributed Claim Locks",
+    "",
+    `Mode: ${apply ? "apply" : "dry-run"}`,
+    `Repository: ${owner}/${repo}`,
+    `Remote lock refs: ${inspection.length}`,
+    `Active: ${active.length}`,
+    `Stale: ${stale.length}`,
+    `Orphaned: ${orphaned.length}`,
+    "",
+    "## Locks",
+  ];
+
+  if (inspection.length === 0) {
+    lines.push("- None");
+  } else {
+    for (const lock of inspection) {
+      if (lock.status === "active" || lock.status === "stale") {
+        lines.push(`- ${lock.status}: ${lock.ref} -> ${lock.artifact.dispatch_id || path.basename(lock.fullPath)}`);
+      } else {
+        lines.push(`- orphaned: ${lock.ref}`);
+      }
+    }
+  }
+
+  if (!apply) {
+    lines.push("", "No remote lock refs were deleted. Add `--apply --approved-by <operator> --reason \"...\"` to delete orphaned refs only.");
+    process.stdout.write(`${lines.join("\n")}\n`);
+    return;
+  }
+
+  for (const lock of orphaned) {
+    const apiRef = lock.ref.replace(/^refs\//, "");
+    await runGh(["api", "-X", "DELETE", `repos/${owner}/${repo}/git/refs/${apiRef}`]);
+  }
+
+  lines.push("", `Deleted orphaned lock refs: ${orphaned.length}`);
+  if (stale.length > 0) {
+    lines.push("Stale matched locks were not deleted here; use `pnpm ops reclaim-expired -- --apply --apply-lock-ref` so local dispatch state and remote refs move together.");
   }
   process.stdout.write(`${lines.join("\n")}\n`);
 }
@@ -4115,6 +4235,11 @@ async function main() {
 
   if (command === "claim-status") {
     await claimStatus(args);
+    return;
+  }
+
+  if (command === "claim-locks") {
+    await claimLocks(args);
     return;
   }
 
