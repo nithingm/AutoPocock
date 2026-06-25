@@ -17,7 +17,7 @@ This audit records what current evidence proves and what it does not prove. It s
 | --- | --- | --- |
 | Current project state is documented | `docs/agents/project-status.md` separates landed baseline, local working tree, GitHub Issues, Project drift, verification, and remaining work. | Proven locally |
 | Project knowledge is discoverable | `docs/agents/knowledge-map.md` maps durable language, command contracts, evidence artifacts, system planes, trust rules, and continuation order. | Proven locally |
-| Dirty working tree is explainable | `docs/agents/local-change-inventory.md` lists tracked modifications, new source modules, new tests, durable artifacts, runtime scratch state, commit slices, and guardrails. | Proven locally |
+| Review branch and local scratch state are explainable | `docs/agents/local-change-inventory.md` lists the committed PR surface, durable artifacts, intentionally unstaged scratch/demo artifacts, runtime scratch state, review order, and guardrails. | Proven locally |
 | Manual OS acceptance is visible | `docs/agents/manual-acceptance-checklist.md` records the accepted manual OS gate and points to CLI/QA regression evidence. | Proven locally |
 | Runtime setup is healthy | `pnpm ops setup` reports git, node, pnpm, GitHub CLI/auth, Codex provider, and workflow directories ready. | Proven locally |
 | Test suite is green | `pnpm test` passes 179 tests with 0 failures. | Proven locally |
@@ -26,8 +26,10 @@ This audit records what current evidence proves and what it does not prove. It s
 | GitHub Project reads work | `pnpm ops github:export -- --issue 45` can read the configured Project and write `.ai/queue.json` with issue `#45` present. | Proven |
 | GitHub Project write reconciliation is possible now | Strict verification reports Project write scope present after the token refresh. | Proven |
 | Issue `#45` through `#55` are visible in the configured Project | The reconciliation command added issues `#45` through `#55`; strict verification confirms `#45` visibility through the Project export path. | Proven |
-| Automation layer is landed on `origin/main` | Branch is `main` and aligned with `origin/main`, but the working tree is dirty with tracked and untracked local implementation work. | Not achieved |
-| Automation layer has a review surface | No PR exists, and no source/test/docs commit slices have been staged or committed. | Not achieved |
+| Automation layer is committed and pushed for review | Branch `codex/land-automation-layer` is pushed to origin with automation-layer, CI, cross-platform test, and status-documentation commits. | Proven |
+| Automation layer has a review surface | Draft PR `#56` exists at `https://github.com/nithingm/AutoPocock/pull/56`. | Proven |
+| Remote CI validates the review branch | GitHub Actions CI for PR `#56` runs frozen install, `pnpm test`, and `pnpm smoke:console`; latest checks pass. | Proven |
+| Automation layer is landed on `origin/main` | PR `#56` is still draft and unmerged. | Not achieved |
 
 ## Verified Commands
 
@@ -49,6 +51,7 @@ Observed results:
 - 179 tests passed
 - GitHub Project export completed and included issue `#45`
 - workflow console smoke passed on an ephemeral local port
+- GitHub Actions CI passed on PR `#56`
 
 ## Resolved External Blocker
 
@@ -60,18 +63,18 @@ The recovery artifact remains at `docs/agents/hitl/2026-06-25-github-project-sco
 
 ## Completion Decision
 
-The local knowledge layer is materially improved and currently verified. External Project reconciliation is ready. The project is not fully complete because local landing/review is not done.
+The local knowledge layer is materially improved and currently verified. External Project reconciliation is ready. The automation layer is committed, pushed, and under draft PR review with green CI. It is not landed on `origin/main` until PR `#56` is accepted and merged.
 
 Do not mark the active goal complete until all of these are true:
 
-1. Source/test/docs changes have been reviewed and committed in coherent slices.
-2. A PR or equivalent review surface exists for the automation layer.
-3. Closed Project items no longer pollute scheduler/export output after the local source cleanup path.
-4. `pnpm verify:project -- --strict-external`, `pnpm ops setup`, `pnpm test`, `pnpm ops github:export -- --issue 45`, and `pnpm smoke:console` all pass after cleanup/review.
+1. The Solo Operator accepts PR `#56` or marks it ready for review.
+2. Any remaining local scratch/demo artifacts are intentionally deleted, ignored, or promoted in a separate reviewed change.
+3. Issue state moves only after reviewed PR evidence supports each transition.
+4. `pnpm verify:project -- --strict-external`, `pnpm ops setup`, `pnpm test`, `pnpm ops github:export -- --issue 45`, `pnpm smoke:console`, and GitHub Actions CI all pass after final review updates.
 
 ## Next Best Action
 
-Use `docs/agents/local-change-inventory.md` to review and commit coherent slices, then rerun:
+Review PR `#56`, decide the fate of the intentionally unstaged scratch/demo artifacts, then rerun:
 
 ```bash
 pnpm ops github:export -- --issue 45

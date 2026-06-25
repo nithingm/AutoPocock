@@ -3,15 +3,16 @@
 Date: 2026-06-25
 Repo: `D:\Projects\AutoPocock`
 
-This inventory explains the current dirty working tree so the Solo Operator or a follow-on agent can review, slice, and commit local work without confusing source changes, durable Workflow Artifacts, and runtime records.
+This inventory explains what was committed to PR `#56` and what remains as intentionally unstaged scratch/demo output so the Solo Operator or a follow-on agent can avoid confusing source changes, durable Workflow Artifacts, and runtime records.
 
 ## Current Snapshot
 
 Branch state:
 
-- `main`
-- aligned with `origin/main`
-- local working tree contains tracked modifications and many untracked files
+- `codex/land-automation-layer`
+- pushed to `origin/codex/land-automation-layer`
+- draft PR `#56`: `https://github.com/nithingm/AutoPocock/pull/56`
+- local working tree still has untracked scratch/demo artifacts outside the PR
 
 External tracker state:
 
@@ -37,10 +38,11 @@ Observed:
 - 179 tests passed
 - export wrote `.ai/queue.json` and found issue `#45` in the configured Project
 - workflow console smoke passed on an ephemeral local port and closed cleanly
+- GitHub Actions CI passed for PR `#56`
 
-## Tracked Modified Surface
+## Committed Review Surface
 
-These tracked files contain the current manual-OS hardening and navigation updates:
+PR `#56` contains the current manual-OS hardening, automation layer, tests, and durable orientation artifacts:
 
 - `.ai/ops.config.json`
 - `.gitignore`
@@ -70,9 +72,9 @@ Review meaning:
 - The CLI changes support context/PRD approval, exact artifact matching, strict targeted QA, GitHub export reporting, dispatch validation, review/QA decisions, provider execution entrypoints, and workflow console wiring.
 - `.ai/ops.config.json` now points at the real `nithingm/AutoPocock` repository and Project 1. Treat that as useful local configuration, but review whether the template should commit real project defaults.
 
-## New Source Modules
+## Source Modules In PR `#56`
 
-The untracked implementation modules are the bulk of the automation layer:
+The implementation modules are the bulk of the automation layer:
 
 - `scripts/lib/codex-exec.mjs`
 - `scripts/lib/completion-evidence.mjs`
@@ -106,12 +108,12 @@ The untracked implementation modules are the bulk of the automation layer:
 Review meaning:
 
 - These should be reviewed as real source code, not generated evidence.
-- They are currently covered by the full test suite, but they are not landed on `origin/main`.
+- They are covered by the full test suite, local strict verification, and GitHub Actions CI, but they are not landed on `origin/main`.
 - `runtime-host.mjs` contains the Windows command-shim fix that makes `pnpm ops setup` correctly detect `pnpm` and `codex` on this machine.
 
-## New Test Modules
+## Test Modules In PR `#56`
 
-The untracked tests are the strongest local evidence for the automation layer:
+The tests are the strongest implementation evidence for the automation layer:
 
 - `tests/dag-github-reconcile.test.mjs`
 - `tests/dag-github-sync.test.mjs`
@@ -138,9 +140,9 @@ Review meaning:
 - Keep source and tests together by feature slice.
 - Do not treat the green full suite as a substitute for reviewing scope boundaries, generated artifacts, or Project reconciliation.
 
-## Durable Workflow Artifacts To Review
+## Durable Workflow Artifacts In PR `#56`
 
-These untracked artifacts look like durable project evidence or workflow history:
+These artifacts were promoted as durable project evidence or workflow history:
 
 - current status/orientation: `docs/agents/project-status.md`, `docs/agents/knowledge-map.md`, this inventory
 - resolved HITL blocker record: `docs/agents/hitl/2026-06-25-github-project-scope-needed.md`
@@ -153,8 +155,8 @@ These untracked artifacts look like durable project evidence or workflow history
 
 Review meaning:
 
-- Commit only the artifacts that explain durable decisions, evidence, or handoffs.
-- Generated examples such as `feature-name`, `my-feature`, issue `123`, and local placeholder contexts should be reviewed before committing. They may be useful fixtures or may be noise.
+- PR `#56` includes artifacts that explain durable decisions, evidence, or handoffs.
+- Generated examples such as `feature-name`, `my-feature`, issue `123`, and local placeholder contexts were left untracked. They may be useful fixtures or may be noise.
 - Dispatch and scheduler artifacts are often useful audit evidence, but they can become clutter if they are only transient run output.
 
 ## Runtime Or Scratch State
@@ -171,7 +173,15 @@ Review meaning:
 - Do not commit those files by default.
 - Promote only a specific runtime record if it is needed as durable evidence, and explain why in the commit or artifact that references it.
 
-## Suggested Review Slices
+The following untracked files are also intentionally outside PR `#56`:
+
+- `docs/PRDs/2026-05-14-feature-name.md`
+- `docs/PRDs/2026-05-14-my-feature.md`
+- issue `123`, issue `3`, issue `4`, and `my-feature` generated artifacts
+- local placeholder context artifacts
+- transient dispatch, schedule, feedback, review-prep, and memory-proposal artifacts
+
+## Suggested Review Order
 
 ### Slice 1: Manual OS Acceptance And Windows Readiness
 
@@ -302,4 +312,4 @@ Likely files:
 - Run `pnpm verify:project -- --strict-external` after each slice when the external checks should be reported with the local readiness state.
 - Re-run `pnpm ops github:export -- --issue 45` after tracker-affecting changes.
 - Run `pnpm smoke:console` after console or artifact-loading changes.
-- Open a PR or another explicit review surface before calling the automation layer landed.
+- Keep PR `#56` as the review surface, and do not call the automation layer landed until the PR is accepted and merged.

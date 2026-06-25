@@ -9,7 +9,7 @@ This is the operator-facing map of where the project's knowledge lives and how t
 
 AutoPocock is no longer just a manual repo template. The accepted manual operating system is present, documented, and test-backed in the current working tree. On top of that, the local tree now contains a broader provider/DAG/Ralph orchestration layer with test coverage.
 
-The automation layer is still local work. It is not yet cleanly landed on `origin/main`, not yet reviewed as commit-sized slices, and not yet reconciled with the GitHub Project board.
+The automation layer is now on review branch `codex/land-automation-layer` under draft PR `#56`. It is committed, pushed, CI-backed, and reconciled far enough for Project visibility, but it is not landed on `origin/main` until the PR is accepted and merged.
 
 ## Read These First
 
@@ -44,7 +44,7 @@ The automation layer is still local work. It is not yet cleanly landed on `origi
 `docs/agents/project-status.md` is the current operating read. It separates:
 
 - landed `origin/main`
-- implemented local source/test/docs work
+- committed review-branch source/test/docs work
 - live GitHub Issues and Project board state
 
 Use it before deciding whether to continue implementation, review local changes, reconcile tracker state, or prepare a PR.
@@ -111,11 +111,12 @@ Observed:
 - GitHub bootstrap remains dry-run-first and reports drift instead of destructive mutation
 - issue `#45` is visible in the configured GitHub Project export after issues `#45` through `#55` were added
 - the workflow console can serve the current workspace state on an ephemeral local port and close cleanly
+- PR `#56` exists and GitHub Actions CI is green for frozen install, `pnpm test`, and `pnpm smoke:console`
 
 ## Trust Rules
 
 - Use `origin/main` when you need the stable, landed manual OS baseline.
-- Use the local working tree when continuing provider/DAG/Ralph orchestration work.
+- Use branch `codex/land-automation-layer` / PR `#56` when continuing provider/DAG/Ralph orchestration work.
 - Use GitHub Issues for live issue existence, ownership, and eventual stage movement.
 - Do not use the GitHub Project board as the sole source of truth for implementation completeness; use it for restored tracker visibility.
 - Do not close `#45` through `#55` based only on local completion reports. Review the corresponding source/test/docs evidence first.
@@ -126,11 +127,11 @@ Observed:
 
 The work left is mostly operational hardening and reconciliation:
 
-1. Use `docs/agents/local-change-inventory.md` to split durable source/test/docs changes from runtime scratch artifacts.
-2. Review the automation-layer implementation in commit-sized slices.
-3. Commit and open a review surface for the local implementation.
-4. Re-run full local tests plus strict live tracker verification after cleanup.
-5. Move issue state only after reviewed evidence supports each transition.
+1. Review PR `#56`.
+2. Decide whether intentionally unstaged scratch/demo artifacts should be deleted, ignored, or promoted separately.
+3. Re-run full local tests plus strict live tracker verification after any review updates.
+4. Move issue state only after reviewed evidence supports each transition.
+5. Merge PR `#56` when accepted.
 
 ## Continuation Brief
 
