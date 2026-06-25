@@ -17,7 +17,7 @@ This roadmap captures the operating-system direction decided during the initial 
 
 ## Current Status Snapshot
 
-As of 2026-06-25, the manual operating system is accepted for pre-automation use in the current working tree. The current local implementation also includes a broader provider/DAG/Ralph orchestration layer, but that work is not yet cleanly landed on `origin/main` or reconciled with the GitHub Project board.
+As of 2026-06-25, the manual operating system is accepted for pre-automation use and the provider/DAG/Ralph orchestration layer is landed on `origin/main`, CI-backed, and reconciled with the GitHub Project board for the completed `#44` through `#55` slice set.
 
 Use `docs/agents/project-status.md` as the current operational read before deciding whether to continue implementation, review local changes, or reconcile tracker state. Use `docs/agents/knowledge-map.md` to orient across domain language, command contracts, Workflow Artifacts, live tracker state, and remaining work.
 
@@ -91,33 +91,33 @@ Execution lanes:
 - Targeted QA is strict for AFK workflow and permissive only in Manual Mode.
 - Missing handoff or completion context is a workflow failure.
 
-## Future Commands
+## Current Commands And Future Extensions
 
 - `pnpm ops github:init`: dry-run GitHub tracker setup using the `gh` CLI.
 - `pnpm ops github:init -- --apply`: create missing labels and verify local issue templates.
 - `pnpm ops github:init`: report required GitHub Project fields/views; do not create Projects in the first version.
 - `pnpm ops github:init -- --create-project`: future explicit project creation mode after label/export work is stable.
 - `pnpm ops github:export`: export GitHub issue/project metadata into `.ai/queue.json`.
-- `pnpm ops mirror`: summarize supported local workflow artifacts into dry-run GitHub comment bodies.
+- `pnpm ops mirror`: summarize supported local workflow artifacts into dry-run GitHub comment bodies; `--apply` posts with an explicit GitHub mutation.
 - `pnpm ops memory-propose`: create durable memory proposal artifacts without editing durable memory directly.
 - `pnpm ops schedule -- --apply`: update project fields without dispatching.
 - `pnpm ops schedule -- --dispatch`: create dispatch artifacts from a Scheduler Plan.
-- `pnpm ops dispatch`: expand from manual artifact creation to scheduler-plan sourced artifact creation.
-- `pnpm ops claim`: mature from file-based claiming to runner-safe atomic claiming.
-- `pnpm ops run`: future external runner entrypoint.
+- `pnpm ops dispatch`: create audited manual dispatch artifacts, while scheduler-sourced dispatches are created by `schedule -- --dispatch`.
+- `pnpm ops claim`: file-based claim flow is implemented; a future extension can make claiming atomic across concurrent runners.
+- `pnpm ops run`: validate claimed dispatches, prepare worktrees, and execute through stub/live provider boundaries; a future extension can harden external runner deployment.
 - `pnpm ops review-prep`: validate Review Entry Gate inputs and generate advisory Review Prep when the gate passes.
 - `pnpm ops qa`: load issue, PR, handoff, completion, and review prep context from GitHub.
-- `pnpm ops feedback`: turn QA defects into Same-PR Fix decisions or new bug issues.
+- `pnpm ops feedback`: classify QA defects locally by default; `--apply` either posts Same-PR Fix candidates to the PR or creates follow-up GitHub issues for broader bugs.
 
 ## Open Design Questions
 
-- Exact GitHub Project field schema and how the Solo Operator supplies project URL/id.
+- How much of GitHub Project creation, field creation, and view setup should be automated beyond the current report-first contract.
 - Runner interface shape for Codex, Claude Code, and other providers.
 - Worktree directory layout and cleanup policy.
 - Docker image contract and mounted workspace layout.
 - How to infer advisory Conflict Surface from file paths and active PRs.
-- How to mirror local artifacts into GitHub comments safely.
-- How to detect stale Dispatch Claims.
+- Whether local body-file mirroring should gain richer duplicate/comment-update behavior.
+- How to make Dispatch Claims atomic for concurrent runners beyond the current stale-claim inspection and explicit reclaim flow.
 - How to summarize Durable Memory update proposals for Solo Operator approval.
 
 ## Locked GitHub Bootstrap Decisions

@@ -50,21 +50,34 @@ export async function ensureWorktreePath(worktreePath) {
   return worktreePath;
 }
 
-export async function runCommand(command, args = [], options = {}) {
-  return execFileAsync(command, args, {
-    cwd: options.cwd,
-    windowsHide: true,
-    maxBuffer: options.maxBuffer ?? 1024 * 1024,
-    env: options.env ?? process.env,
-  });
-}
-
 function quoteCmdPart(value) {
   const text = String(value);
   if (!/[\s&()^|<>"]/.test(text)) {
     return text;
   }
   return `"${text.replace(/"/g, '\\"')}"`;
+}
+
+export async function runCommand(command, args = [], options = {}) {
+  const extension = path.extname(command).toLowerCase();
+
+  if ((options.platform ?? process.platform) === "win32" && [".cmd", ".bat"].includes(extension)) {
+    const shell = options.env?.ComSpec || process.env.ComSpec || "cmd.exe";
+    const commandLine = [command, ...args].map(quoteCmdPart).join(" ");
+    return execFileAsync(shell, ["/d", "/s", "/c", commandLine], {
+      cwd: options.cwd,
+      windowsHide: true,
+      maxBuffer: options.maxBuffer ?? 1024 * 1024,
+      env: options.env ?? process.env,
+    });
+  }
+
+  return execFileAsync(command, args, {
+    cwd: options.cwd,
+    windowsHide: true,
+    maxBuffer: options.maxBuffer ?? 1024 * 1024,
+    env: options.env ?? process.env,
+  });
 }
 
 async function runCommandAvailabilityCandidate(command, args = [], options = {}) {

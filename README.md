@@ -46,7 +46,7 @@ The late-stage pre-PR path is also intentional:
 The manual OS assumes GitHub is the live tracker, but the repo stays local-first.
 
 - Configure `.ai/ops.config.json` with the target GitHub owner, repo, and Project reference.
-- Install and authenticate `gh` before any GitHub-backed step such as `pnpm ops github:init`, `pnpm ops github:export`, or `pnpm ops mirror -- --apply`.
+- Install and authenticate `gh` before any GitHub-backed step such as `pnpm ops github:init`, `pnpm ops github:export`, `pnpm ops mirror -- --apply`, or `pnpm ops feedback -- --apply`.
 - Run `pnpm ops github:init` first as a dry run. The validated behavior is bootstrap reporting plus missing-label creation only when `-- --apply` is used.
 - Create and maintain the GitHub Project manually in this version. `github:init` does not create Projects, fields, or views for you.
 - Keep the required Project fields aligned with `docs/agents/board.md` and `.ai/ops.config.json`: `Execution Stage`, `Execution Lane`, `Queue Class`, `Risk`, `Dependency`, `Conflict Surface`, `Feature Track`, and `Dispatch ID`.
@@ -117,5 +117,5 @@ What counts as done for a slice in the manual OS:
 5. Run `pnpm ops review-prep` only after the Review Entry Gate inputs are explicit.
 6. Export or prepare queue input, then run `pnpm ops schedule -- --dispatch` to create dispatch artifacts for eligible AFK work.
 7. Run `pnpm ops qa`.
-8. Run `pnpm ops feedback` to classify QA findings before deciding on Same-PR fixes or bug follow-ups.
+8. Run `pnpm ops feedback` to classify QA findings before deciding on Same-PR fixes or bug follow-ups. Add `--apply` only when you intentionally want the PR comment or follow-up issue created in GitHub.
 9. Capture defects as new issues instead of widening the current change.

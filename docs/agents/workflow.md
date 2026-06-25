@@ -45,7 +45,7 @@ The Umbrella CLI stages the workflow:
 - `pnpm ops qa-decision -- --dag issues/file.json --issue 123 --node node-1 --decision pass --approved-by solo-operator`: apply an explicit QA pass or fail to a DAG node, write a QA decision artifact, and create a follow-up bug draft automatically on QA failure
 - `pnpm ops memory-propose -- --type workflow --title "Update workflow contract" --rationale "Why this belongs in durable memory" --target-files "docs/agents/workflow.md|CONTEXT.md" --suggested-text "Proposed durable memory text" --accept-risk "Risk if accepted" --reject-risk "Risk if rejected"`: create durable memory proposal artifacts without editing durable memory directly
 - `pnpm ops mirror -- --artifact docs/agents/handoffs/file.md --issue 123`: dry-run a selective GitHub comment mirror for supported workflow artifacts
-- `pnpm ops feedback -- --issue 123 --finding "QA finding text"`: classify a QA finding into a Same-PR Fix candidate or a new bug draft, and write a local feedback artifact without mutating GitHub; add `--pr 456` only when a PR already exists
+- `pnpm ops feedback -- --issue 123 --finding "QA finding text"`: classify a QA finding into a Same-PR Fix candidate or a new bug draft, and write a local feedback artifact without mutating GitHub; add `--pr 456` only when a PR already exists, and add `--apply` only when you intentionally want the GitHub mutation
 - `pnpm ops dispatch -- --issue 123 --title "Implement slice" --source manual --override-reason "Solo Operator approved"`: create dispatch-ready artifacts without calling a subagent
 - `pnpm ops claim -- --dispatch docs/agents/dispatches/dispatch-id.json --claimed-by runner-name --isolation-mode worktree`: claim a queued dispatch artifact
 - `pnpm ops claim-status -- --dispatch docs/agents/dispatches/dispatch-id.json --max-age-hours 24`: inspect whether a claimed dispatch looks stale
@@ -68,7 +68,7 @@ GitHub-backed flow depends on a real project configuration, not just local files
 
 - `pnpm ops setup` is the top-level readiness check for local structure, host environment, provider availability, and GitHub config/auth state.
 - `.ai/ops.config.json` must contain the intended GitHub owner, repo, and Project reference.
-- `gh` must be installed and authenticated before `pnpm ops github:init`, `pnpm ops github:export`, or `pnpm ops mirror -- --apply`.
+- `gh` must be installed and authenticated before `pnpm ops github:init`, `pnpm ops github:export`, `pnpm ops mirror -- --apply`, or `pnpm ops feedback -- --apply`.
 - `pnpm ops github:init` is a bootstrap report by default. With `-- --apply`, validated behavior is limited to creating missing canonical labels.
 - GitHub Project creation, field creation, and view creation are still manual in this version.
 - `pnpm ops board` prints the board contract only. It does not verify live GitHub schema drift.
@@ -172,7 +172,7 @@ Review and QA progression are now durable workflow transitions, not implicit hum
 To make the whole flow work end-to-end as the Solo Operator:
 
 - Configure `.ai/ops.config.json` with the GitHub owner/repo/project reference when you want live tracker export/bootstrap behavior.
-- Install and authenticate `gh` for any GitHub-backed step such as `github:init -- --apply`, `github:export`, or `mirror -- --apply`.
+- Install and authenticate `gh` for any GitHub-backed step such as `github:init -- --apply`, `github:export`, `mirror -- --apply`, or `feedback -- --apply`.
 - Keep issue slices bounded enough that one handoff, one review, and one QA pass still make sense.
 - Write real handoff, completion, and review-prep artifacts instead of placeholders, because strict QA now uses that context directly.
 - Export or prepare `.ai/queue.json`, then run `pnpm ops schedule -- --dispatch` to create actual dispatch artifacts for eligible work.
@@ -195,12 +195,13 @@ A slice is complete enough to move through review and QA only when all of the fo
 
 ## Feedback
 
-`pnpm ops feedback` is local-first in this version.
+`pnpm ops feedback` is local-first by default.
 
 - Minor findings may be classified as Same-PR Fix candidates, but Solo Operator approval is still required.
 - Broader defects default to new bug drafts linked back to the original issue and PR.
 - The command writes local JSON and markdown artifacts under `docs/agents/feedback/`.
 - No GitHub issue or comment is created by default.
+- With explicit `--apply`, Same-PR Fix candidates are posted to the PR and broader bug drafts create follow-up GitHub issues. The persisted feedback artifact records the mutation result.
 
 ## Manual Mode
 

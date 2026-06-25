@@ -1,5 +1,5 @@
 import { execFile, spawn } from "node:child_process";
-import { access, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -7,7 +7,7 @@ import { buildReviewPrep, parseCompletionReport } from "./lib/review-gate.mjs";
 import { createGitHubBootstrapReport } from "./lib/github-init.mjs";
 import { createMemoryProposal, writeMemoryProposalArtifact } from "./lib/memory-proposals.mjs";
 import { buildMirrorComment, renderMirrorPlan } from "./lib/artifact-mirror.mjs";
-import { classifyFeedback, renderFeedbackClassification } from "./lib/feedback-classifier.mjs";
+import { classifyFeedback, createFeedbackArtifactSuggestion, renderFeedbackClassification } from "./lib/feedback-classifier.mjs";
 import {
   approveContextArtifact,
   latestArtifactPath,
@@ -432,6 +432,33 @@ async function runNodeScript(script, args) {
   });
   process.stdout.write(result.stdout);
   process.stderr.write(result.stderr);
+}
+
+async function runGh(args) {
+  const candidates = process.platform === "win32" ? ["gh.cmd", "gh.exe", "gh.bat", "gh"] : ["gh"];
+  let lastError = null;
+
+  for (const candidate of candidates) {
+    try {
+      return await runCommand(candidate, args);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error("gh CLI command failed.");
+}
+
+async function withTemporaryGhBody(body, callback) {
+  const tempPath = path.join(cwd, ".ai", `tmp-feedback-body-${Date.now()}-${Math.random().toString(36).slice(2)}.md`);
+  await mkdir(path.dirname(tempPath), { recursive: true });
+  await writeFile(tempPath, body, "utf8");
+
+  try {
+    return await callback(tempPath);
+  } finally {
+    await unlink(tempPath).catch(() => {});
+  }
 }
 
 async function killProcessTree(pid) {
@@ -1100,23 +1127,76 @@ async function mirrorArtifact(args) {
   }
 
   if (issue) {
-    await runCommand("gh", ["issue", "comment", issue, "--body", comment.body]);
+    await withTemporaryGhBody(comment.body, (bodyPath) =>
+      runGh(["issue", "comment", issue, "--body-file", bodyPath]));
   } else {
-    await runCommand("gh", ["pr", "comment", pr, "--body", comment.body]);
+    await withTemporaryGhBody(comment.body, (bodyPath) =>
+      runGh(["pr", "comment", pr, "--body-file", bodyPath]));
   }
 }
 
 async function feedbackCommand(args) {
-  if (args.includes("--apply")) {
-    throw new Error("feedback -- --apply is not implemented. No GitHub issue or comment was created.");
-  }
-
+  const apply = args.includes("--apply");
   const result = classifyFeedback({
     issue: readOption(args, "issue"),
     pr: readOption(args, "pr"),
     finding: readOption(args, "finding"),
   });
-  const suggestion = result.artifact_suggestion;
+  let suggestion = result.artifact_suggestion;
+  let githubResult = "";
+
+  if (apply) {
+    const ghVersion = await commandAvailable("gh");
+    if (!ghVersion.available) {
+      throw new Error("gh CLI is required for feedback -- --apply. Install it from https://cli.github.com/.");
+    }
+
+    const auth = await commandAvailable("gh", ["auth", "status"]);
+    if (!auth.available) {
+      throw new Error("GitHub authentication is required for feedback -- --apply. Run `gh auth login` first.");
+    }
+
+    const pendingSuggestion = createFeedbackArtifactSuggestion(result, {
+      artifactId: suggestion.artifact_id,
+      createdAt: suggestion.json_payload.created_at,
+      mode: "apply",
+      githubMutation: result.kind === "same-pr-fix" ? "pending-pr-comment" : "pending-issue-create",
+      mutationMessage: "GitHub mutation requested by `feedback -- --apply`.",
+    });
+
+    if (result.kind === "same-pr-fix") {
+      await withTemporaryGhBody(pendingSuggestion.markdown_payload, (bodyPath) =>
+        runGh(["pr", "comment", result.pr, "--body-file", bodyPath]));
+      githubResult = `GitHub PR comment posted to #${result.pr}.`;
+      suggestion = createFeedbackArtifactSuggestion(result, {
+        artifactId: suggestion.artifact_id,
+        createdAt: suggestion.json_payload.created_at,
+        mode: "apply",
+        githubMutation: "posted-pr-comment",
+        mutationMessage: githubResult,
+      });
+    } else {
+      const created = await withTemporaryGhBody(pendingSuggestion.markdown_payload, (bodyPath) =>
+        runGh([
+          "issue",
+          "create",
+          "--title",
+          result.bug_draft.title,
+          "--body-file",
+          bodyPath,
+        ]));
+      const createdUrl = created.stdout.trim().split(/\r?\n/).find(Boolean) || "";
+      githubResult = createdUrl ? `GitHub issue created: ${createdUrl}` : "GitHub issue created.";
+      suggestion = createFeedbackArtifactSuggestion(result, {
+        artifactId: suggestion.artifact_id,
+        createdAt: suggestion.json_payload.created_at,
+        mode: "apply",
+        githubMutation: "created-issue",
+        mutationMessage: githubResult,
+      });
+    }
+  }
+
   const feedbackDir = path.join(cwd, suggestion.dir);
   const jsonTarget = path.join(cwd, suggestion.json_path);
   const markdownTarget = path.join(cwd, suggestion.markdown_path);
@@ -1125,7 +1205,10 @@ async function feedbackCommand(args) {
   await writeFile(jsonTarget, `${JSON.stringify(suggestion.json_payload, null, 2)}\n`, "utf8");
   await writeFile(markdownTarget, suggestion.markdown_payload, "utf8");
 
-  process.stdout.write(renderFeedbackClassification(result));
+  process.stdout.write(apply ? suggestion.markdown_payload : renderFeedbackClassification(result));
+  if (githubResult) {
+    process.stdout.write(`${githubResult}\n`);
+  }
   process.stdout.write(`\n${jsonTarget}\n${markdownTarget}\n`);
 }
 
@@ -2388,7 +2471,8 @@ async function runMirror(args) {
     throw new Error("GitHub authentication is required for run-mirror -- --apply. Run `gh auth login` first.");
   }
 
-  await runCommand("gh", ["issue", "comment", issueRef, "--body", comment.body]);
+  await withTemporaryGhBody(comment.body, (bodyPath) =>
+    runGh(["issue", "comment", issueRef, "--body-file", bodyPath]));
   process.stdout.write(`GitHub comment posted to issue #${issueRef}.\n`);
 }
 

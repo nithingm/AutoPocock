@@ -174,17 +174,17 @@ function buildArtifactId(result, options = {}) {
   };
 }
 
-function buildArtifactPayload(result, { artifactId, createdAt }) {
+function buildArtifactPayload(result, { artifactId, createdAt, mode = result.mode, githubMutation = "disabled" }) {
   return {
     artifact_type: "feedback-summary",
     artifact_id: artifactId,
     created_at: createdAt,
-    mode: result.mode,
+    mode,
     classification: result.kind,
     issue: `#${result.issue}`,
     pr: `#${result.pr}`,
     decision_basis: result.decision_basis,
-    github_mutation: "disabled",
+    github_mutation: githubMutation,
     same_pr_fix: result.kind === "same-pr-fix" ? result.candidate_fix : null,
     bug_draft: result.kind === "new-bug-draft" ? result.bug_draft : null,
   };
@@ -196,7 +196,7 @@ function renderFeedbackBody(result, options = {}) {
   const lines = [
     title,
     "",
-    "- Mode: dry-run",
+    `- Mode: ${options.mode || result.mode || "dry-run"}`,
     `- Original issue: #${result.issue}`,
     `- Original PR: #${result.pr}`,
     `- Classification: ${result.kind}`,
@@ -240,7 +240,7 @@ function renderFeedbackBody(result, options = {}) {
       lines.push(`- Markdown path: ${result.artifact_suggestion.markdown_path}`);
     }
 
-    lines.push("", "No GitHub issue or comment was created.");
+    lines.push("", options.mutationMessage || "No GitHub issue or comment was created.");
     return `${lines.join("\n")}\n`;
   }
 
@@ -264,14 +264,19 @@ function renderFeedbackBody(result, options = {}) {
     lines.push(`- Markdown path: ${result.artifact_suggestion.markdown_path}`);
   }
 
-  lines.push("", "No GitHub issue or comment was created.");
+  lines.push("", options.mutationMessage || "No GitHub issue or comment was created.");
 
   return `${lines.join("\n")}\n`;
 }
 
 export function createFeedbackArtifactSuggestion(result, options = {}) {
   const { createdAt, artifactId } = buildArtifactId(result, options);
-  const jsonPayload = buildArtifactPayload(result, { artifactId, createdAt });
+  const jsonPayload = buildArtifactPayload(result, {
+    artifactId,
+    createdAt,
+    mode: options.mode || result.mode,
+    githubMutation: options.githubMutation || "disabled",
+  });
 
   return {
     dir: FEEDBACK_ARTIFACT_DIR,
@@ -282,6 +287,8 @@ export function createFeedbackArtifactSuggestion(result, options = {}) {
     markdown_payload: renderFeedbackBody(result, {
       title: "# Feedback Summary",
       includeArtifactSuggestion: false,
+      mode: options.mode,
+      mutationMessage: options.mutationMessage,
     }),
   };
 }

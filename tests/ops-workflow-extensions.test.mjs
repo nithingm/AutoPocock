@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, readdir, stat, utimes, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, readdir, stat, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -45,11 +45,15 @@ async function makeWorkspace(config = {}) {
   return dir;
 }
 
-async function runOps(cwd, args) {
+async function runOps(cwd, args, options = {}) {
   try {
     const result = await execFileAsync(process.execPath, [opsScript, ...args], {
       cwd,
       windowsHide: true,
+      env: {
+        ...process.env,
+        ...(options.env || {}),
+      },
     });
     return { code: 0, stdout: result.stdout, stderr: result.stderr };
   } catch (error) {
@@ -59,6 +63,62 @@ async function runOps(cwd, args) {
       stderr: error.stderr || error.message,
     };
   }
+}
+
+async function installFakeGh(cwd) {
+  const binDir = path.join(cwd, "fake-bin");
+  const logPath = path.join(cwd, "gh-calls.log");
+  await mkdir(binDir, { recursive: true });
+
+  const shellPath = path.join(binDir, "gh");
+  await writeFile(
+    shellPath,
+    `#!/bin/sh
+printf '%s\\n' "$*" >> "$GH_LOG"
+if [ "$1" = "--version" ]; then echo "gh version 2.0.0"; exit 0; fi
+if [ "$1" = "auth" ] && [ "$2" = "status" ]; then exit 0; fi
+if [ "$1" = "issue" ] && [ "$2" = "create" ]; then echo "https://github.com/example/repo/issues/999"; exit 0; fi
+if [ "$1" = "pr" ] && [ "$2" = "comment" ]; then echo "https://github.com/example/repo/pull/$3#issuecomment-1"; exit 0; fi
+if [ "$1" = "issue" ] && [ "$2" = "comment" ]; then echo "https://github.com/example/repo/issues/$3#issuecomment-1"; exit 0; fi
+exit 0
+`,
+    "utf8",
+  );
+  await chmod(shellPath, 0o755);
+
+  await writeFile(
+    path.join(binDir, "gh.cmd"),
+    `@echo off
+echo %*>> "%GH_LOG%"
+if "%1"=="--version" (
+  echo gh version 2.0.0
+  exit /b 0
+)
+if "%1"=="auth" if "%2"=="status" exit /b 0
+if "%1"=="issue" if "%2"=="create" (
+  echo https://github.com/example/repo/issues/999
+  exit /b 0
+)
+if "%1"=="pr" if "%2"=="comment" (
+  echo https://github.com/example/repo/pull/%3#issuecomment-1
+  exit /b 0
+)
+if "%1"=="issue" if "%2"=="comment" (
+  echo https://github.com/example/repo/issues/%3#issuecomment-1
+  exit /b 0
+)
+exit /b 0
+`,
+    "utf8",
+  );
+
+  return {
+    logPath,
+    env: {
+      GH_LOG: logPath,
+      PATH: `${binDir}${path.delimiter}${process.env.PATH || ""}`,
+    },
+  };
 }
 
 async function writeDagFixture(cwd) {
@@ -523,6 +583,37 @@ test("mirror prints a dry-run comment target and summarized body", async () => {
   assert.match(result.stdout, /No GitHub comment was posted/);
 });
 
+test("mirror --apply posts via a body file so multiline artifacts are safe", async () => {
+  const cwd = await makeWorkspace();
+  const fakeGh = await installFakeGh(cwd);
+  const artifactDir = path.join(cwd, "docs", "agents", "completions");
+  const artifactPath = path.join(artifactDir, "issue-5.md");
+  await writeFile(
+    artifactPath,
+    `# Completion Report
+
+## Result
+
+- Status: needs human review
+- Summary: Added selective mirroring
+
+## Verification
+
+- Commands run: node --test
+- Results: Passing
+`,
+  );
+
+  const result = await runOps(cwd, ["mirror", "--artifact", artifactPath, "--issue", "5", "--apply"], {
+    env: fakeGh.env,
+  });
+  const ghLog = await readFile(fakeGh.logPath, "utf8");
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /Mode: apply/);
+  assert.match(ghLog, /issue comment 5 --body-file/);
+});
+
 test("feedback prints a dry-run classification without mutating GitHub", async () => {
   const cwd = await makeWorkspace();
 
@@ -550,6 +641,75 @@ test("feedback prints a dry-run classification without mutating GitHub", async (
   assert.match(markdown, /# Feedback Summary/);
   assert.ok((await stat(jsonPath)).isFile());
   assert.ok((await stat(markdownPath)).isFile());
+});
+
+test("feedback --apply posts Same-PR Fix candidates as PR comments and records the mutation", async () => {
+  const cwd = await makeWorkspace();
+  const fakeGh = await installFakeGh(cwd);
+
+  const result = await runOps(
+    cwd,
+    [
+      "feedback",
+      "--issue",
+      "8",
+      "--pr",
+      "314",
+      "--finding",
+      "Evidence: The review page has a typo in the Approve button. Expected Behavior: The button label should say Approve. Actual Behavior: The label says Approe.",
+      "--apply",
+    ],
+    { env: fakeGh.env },
+  );
+  const outputLines = result.stdout.trim().split(/\r?\n/);
+  const jsonPath = outputLines[outputLines.length - 2];
+  const markdownPath = outputLines[outputLines.length - 1];
+  const json = JSON.parse(await readFile(jsonPath, "utf8"));
+  const markdown = await readFile(markdownPath, "utf8");
+  const ghLog = await readFile(fakeGh.logPath, "utf8");
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /Mode: apply/);
+  assert.match(result.stdout, /GitHub PR comment posted to #314/);
+  assert.equal(json.mode, "apply");
+  assert.equal(json.github_mutation, "posted-pr-comment");
+  assert.match(markdown, /GitHub PR comment posted to #314/);
+  assert.match(ghLog, /pr comment 314 --body-file/);
+});
+
+test("feedback --apply creates GitHub issues for broader bug drafts and records the created issue URL", async () => {
+  const cwd = await makeWorkspace();
+  const fakeGh = await installFakeGh(cwd);
+
+  const result = await runOps(
+    cwd,
+    [
+      "feedback",
+      "--issue",
+      "8",
+      "--pr",
+      "314",
+      "--finding",
+      "Evidence: Saving twice returns a 500 error. Expected Behavior: Saving twice remains stable. Actual Behavior: The second save fails with a 500 error.",
+      "--apply",
+    ],
+    { env: fakeGh.env },
+  );
+  const outputLines = result.stdout.trim().split(/\r?\n/);
+  const jsonPath = outputLines[outputLines.length - 2];
+  const markdownPath = outputLines[outputLines.length - 1];
+  const json = JSON.parse(await readFile(jsonPath, "utf8"));
+  const markdown = await readFile(markdownPath, "utf8");
+  const ghLog = await readFile(fakeGh.logPath, "utf8");
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /Mode: apply/);
+  assert.match(result.stdout, /GitHub issue created: https:\/\/github\.com\/example\/repo\/issues\/999/);
+  assert.equal(json.mode, "apply");
+  assert.equal(json.github_mutation, "created-issue");
+  assert.match(markdown, /GitHub issue created: https:\/\/github\.com\/example\/repo\/issues\/999/);
+  assert.match(ghLog, /issue create --title/);
+  assert.match(ghLog, /--body-file/);
 });
 
 test("review-decision approve moves a node into QA and writes a review artifact", async () => {

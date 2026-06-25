@@ -398,7 +398,8 @@ Expected artifact or output:
 - Example verified output in this repo classified the finding as `new-bug-draft` and printed both artifact paths.
 
 Common failure modes:
-- `--apply` is not implemented; the command is local-first and does not create a GitHub issue or comment.
+- Without `--apply`, the command is local-first and does not create a GitHub issue or comment.
+- With `--apply`, Same-PR Fix candidates post to the PR and broader bug drafts create follow-up GitHub issues. Use it only when that mutation is intentional.
 - Vague findings create weak bug drafts. Write the finding as observable behavior, not as a fix idea.
 - `--pr` is optional. Use it when a PR exists and the follow-up should link back to that PR. Omit it on the intended pre-PR path.
 
