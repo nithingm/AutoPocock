@@ -9,7 +9,7 @@ This is the operator-facing map of where the project's knowledge lives and how t
 
 AutoPocock is no longer just a manual repo template. The accepted manual operating system is present, documented, and test-backed in the current working tree. On top of that, the local tree now contains a broader provider/DAG/Ralph orchestration layer with test coverage.
 
-The automation layer is now on review branch `codex/land-automation-layer` under draft PR `#56`. It is committed, pushed, CI-backed, and reconciled far enough for Project visibility, but it is not landed on `origin/main` until the PR is accepted and merged.
+The automation layer is now on review branch `codex/land-automation-layer` under PR `#56`. It is committed, pushed, ready for review, CI-backed, and reconciled far enough for Project visibility, but it is not landed on `origin/main` until the PR is accepted and merged.
 
 ## Read These First
 

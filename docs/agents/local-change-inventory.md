@@ -11,7 +11,7 @@ Branch state:
 
 - `codex/land-automation-layer`
 - pushed to `origin/codex/land-automation-layer`
-- draft PR `#56`: `https://github.com/nithingm/AutoPocock/pull/56`
+- PR `#56`: `https://github.com/nithingm/AutoPocock/pull/56`
 - local working tree still has untracked scratch/demo artifacts outside the PR
 
 External tracker state:

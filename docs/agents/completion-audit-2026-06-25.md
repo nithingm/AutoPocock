@@ -27,9 +27,9 @@ This audit records what current evidence proves and what it does not prove. It s
 | GitHub Project write reconciliation is possible now | Strict verification reports Project write scope present after the token refresh. | Proven |
 | Issue `#45` through `#55` are visible in the configured Project | The reconciliation command added issues `#45` through `#55`; strict verification confirms `#45` visibility through the Project export path. | Proven |
 | Automation layer is committed and pushed for review | Branch `codex/land-automation-layer` is pushed to origin with automation-layer, CI, cross-platform test, and status-documentation commits. | Proven |
-| Automation layer has a review surface | Draft PR `#56` exists at `https://github.com/nithingm/AutoPocock/pull/56`. | Proven |
+| Automation layer has a review surface | PR `#56` exists, is ready for review, and is mergeable at `https://github.com/nithingm/AutoPocock/pull/56`. | Proven |
 | Remote CI validates the review branch | GitHub Actions CI for PR `#56` runs frozen install, `pnpm test`, and `pnpm smoke:console`; latest checks pass. | Proven |
-| Automation layer is landed on `origin/main` | PR `#56` is still draft and unmerged. | Not achieved |
+| Automation layer is landed on `origin/main` | PR `#56` is open and unmerged. | Not achieved |
 
 ## Verified Commands
 
@@ -63,11 +63,11 @@ The recovery artifact remains at `docs/agents/hitl/2026-06-25-github-project-sco
 
 ## Completion Decision
 
-The local knowledge layer is materially improved and currently verified. External Project reconciliation is ready. The automation layer is committed, pushed, and under draft PR review with green CI. It is not landed on `origin/main` until PR `#56` is accepted and merged.
+The local knowledge layer is materially improved and currently verified. External Project reconciliation is ready. The automation layer is committed, pushed, ready for review, and green in CI. It is not landed on `origin/main` until PR `#56` is accepted and merged.
 
 Do not mark the active goal complete until all of these are true:
 
-1. The Solo Operator accepts PR `#56` or marks it ready for review.
+1. The Solo Operator accepts and merges PR `#56`.
 2. Any remaining local scratch/demo artifacts are intentionally deleted, ignored, or promoted in a separate reviewed change.
 3. Issue state moves only after reviewed PR evidence supports each transition.
 4. `pnpm verify:project -- --strict-external`, `pnpm ops setup`, `pnpm test`, `pnpm ops github:export -- --issue 45`, `pnpm smoke:console`, and GitHub Actions CI all pass after final review updates.

@@ -22,7 +22,7 @@ AutoPocock has crossed from a manual agentic repo template into a local, test-ba
 
 The committed baseline on `origin/main` proves the manual OS: PRD creation, issue decomposition, handoff artifacts, GitHub bootstrap/export, scheduling, dispatch artifacts, claiming, runner preparation, completion reports, review prep, targeted QA, feedback classification, and manual workflow documentation.
 
-The review branch goes further. Draft PR `#56` contains implementation and tests for setup/context/PRD planes, layered DAG planning, DAG regeneration, DAG-to-GitHub sync and reconciliation, DAG quality gates, provider-neutral loop specs, wave approval, preflight validation, graph progression, repair insertion, Ralph pause/freeze policy, provider runs, a Codex provider adapter, and an artifact-first workflow console.
+The review branch goes further. PR `#56` contains implementation and tests for setup/context/PRD planes, layered DAG planning, DAG regeneration, DAG-to-GitHub sync and reconciliation, DAG quality gates, provider-neutral loop specs, wave approval, preflight validation, graph progression, repair insertion, Ralph pause/freeze policy, provider runs, a Codex provider adapter, and an artifact-first workflow console.
 
 ## Verification Snapshot
 
@@ -74,9 +74,9 @@ Review branch:
 
 - `codex/land-automation-layer`
 - pushed to `origin/codex/land-automation-layer`
-- draft PR: `https://github.com/nithingm/AutoPocock/pull/56`
+- PR: `https://github.com/nithingm/AutoPocock/pull/56`
 - latest commits add the automation layer, CI workflow, cross-platform test fixes, and this status refresh
-- PR status: mergeable, draft, CI green
+- PR status: ready for review, mergeable, CI green
 
 The review branch contains:
 
@@ -120,7 +120,7 @@ Live GitHub Issues currently show:
 
 - 43 closed issues
 - 12 open issues
-- draft PR `#56` open for the automation layer
+- PR `#56` open and ready for review for the automation layer
 
 The open issues are `#44` through `#55`:
 
@@ -161,7 +161,7 @@ The local Ralph run state is stale: it still records `#45` as `in_progress` and 
 
 The next work is review and merge discipline, not broad feature invention.
 
-1. Review draft PR `#56`.
+1. Review PR `#56`.
 2. Decide whether any intentionally unstaged scratch/demo artifacts should be deleted, ignored, or promoted in a later artifact-only PR.
 3. Update issue states only after the corresponding PR evidence is reviewed.
 4. Run a live end-to-end validation before merge:
@@ -171,7 +171,7 @@ The next work is review and merge discipline, not broad feature invention.
    - scheduler or graph wave preview
    - `pnpm smoke:console`
    - at least one staged run path or fixture-backed equivalent
-5. Mark PR `#56` ready for review or merge it when the Solo Operator accepts the diff.
+5. Merge PR `#56` when the Solo Operator accepts the diff.
 
 ## Current Operating Guidance
 
