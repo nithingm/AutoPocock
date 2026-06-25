@@ -31,7 +31,7 @@ pnpm test
 
 Observed result:
 
-- 225 tests passed
+- 226 tests passed
 - 0 tests failed
 
 This proves the current local source tree is internally coherent.
@@ -56,6 +56,7 @@ Observed result:
 - `github:export -- --issue 45` writes a queue snapshot with 0 active non-Done items; issue `#45` is absent because it is closed and reconciled to Done.
 - the workflow console starts on an ephemeral local port, serves `/`, returns `/api/state`, and closes cleanly.
 - GitHub Actions CI on PR `#56` runs `pnpm install --frozen-lockfile`, `pnpm test`, and `pnpm smoke:console`; the latest run is green.
+- Docker Desktop was started and live Docker validation now runs. `node:22-bookworm` passed a no-network probe for `node` and `git`; it failed the deployment-level probes for `pnpm` and `codex`, proving the stock Node image is not yet the hardened provider execution image.
 
 ## Landed State
 
@@ -159,7 +160,7 @@ The core landing and tracker reconciliation are complete. Remaining work is prod
 
 1. GitHub Project view setup is inspectable through GraphQL, including missing-view and name-drift reports. Creation and renaming remain manual because GitHub CLI/GraphQL do not expose ProjectV2 view mutations.
 2. Package the GitHub ref distributed lock path beyond the landed scheduler dispatch policy, `claim-locks` text/JSON audit, orphan cleanup command, scheduled GitHub Actions audit, and Actions run-summary dashboard: external operator dashboards only if needed.
-3. Run `pnpm ops docker:validate` against the actual hardened Docker images and provider credential packages chosen for deployment.
+3. Build or choose the actual hardened Docker provider image, then rerun `pnpm ops docker:validate` against it. The stock `node:22-bookworm` image passes `node`/`git` checks but does not contain `pnpm` or the Codex provider CLI.
 4. Add more provider adapters only when a concrete provider boundary is needed beyond Codex and Claude Code.
 5. Run a live end-to-end validation after any follow-up changes:
    - `pnpm verify:project -- --strict-external`

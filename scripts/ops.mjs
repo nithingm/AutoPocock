@@ -307,8 +307,14 @@ function providerRequiredCommand(provider) {
 function dockerValidationScript({ commands = [], env = [] } = {}) {
   const checks = [
     "set -eu",
-    ...commands.map((command) => `command -v ${validateShellToken(command, "Required command")} >/dev/null`),
-    ...env.map((name) => `test -n "\${${validateShellToken(name, "Environment variable")}:-}"`),
+    ...commands.map((command) => {
+      const token = validateShellToken(command, "Required command");
+      return `command -v ${token} >/dev/null || { echo "missing command: ${token}" >&2; exit 1; }`;
+    }),
+    ...env.map((name) => {
+      const token = validateShellToken(name, "Environment variable");
+      return `test -n "\${${token}:-}" || { echo "missing env: ${token}" >&2; exit 1; }`;
+    }),
   ];
   return checks.join(" && ");
 }
@@ -2486,7 +2492,7 @@ function splitCommaOrPipeList(value) {
   }
 
   return String(value)
-    .split(/[|,]/)
+    .split(/[|,\s]+/)
     .map((item) => item.trim())
     .filter(Boolean);
 }

@@ -154,6 +154,27 @@ test("docker:validate runs an image readiness probe with required commands and e
   assert.match(dockerLog, /test -n .*CODEX_HOME:-/);
 });
 
+test("docker:validate accepts PowerShell-flattened required command lists", async () => {
+  const cwd = await makeWorkspace();
+  const fakeDocker = await installFakeDocker(cwd);
+  const result = await runOps(cwd, [
+    "docker:validate",
+    "--image",
+    "node:22-bookworm",
+    "--require-command",
+    "node pnpm git",
+  ], {
+    env: fakeDocker.env,
+  });
+  const dockerLog = await readFile(fakeDocker.logPath, "utf8");
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /Required commands: node, pnpm, git/);
+  assert.match(dockerLog, /command -v node/);
+  assert.match(dockerLog, /command -v pnpm/);
+  assert.match(dockerLog, /command -v git/);
+});
+
 test("docker:validate fails when the image readiness probe fails", async () => {
   const cwd = await makeWorkspace();
   const fakeDocker = await installFakeDocker(cwd);
