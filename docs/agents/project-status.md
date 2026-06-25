@@ -66,7 +66,7 @@ Current branch:
 - latest commits include the PR `#56` merge and post-merge status/verifier updates
 - merged PR: `https://github.com/nithingm/AutoPocock/pull/56`
 
-The landed baseline includes the manual OS, original GitHub-backed workflow hardening, automation-layer implementation, opt-in scheduler conflict inference, artifact and Provider Run mirror update/dedup behavior, durable memory proposal decision/apply flow, Codex plus Claude Code provider adapters, guarded fresh Project creation, dry-run-first Project field creation, tracker-visible claim leases, scheduler-enforced GitHub ref distributed claim locks plus text/JSON lock audit, Docker isolation planning/guards, Docker image readiness validation, tests, CI workflow, and durable status/orientation artifacts.
+The landed baseline includes the manual OS, original GitHub-backed workflow hardening, automation-layer implementation, opt-in scheduler conflict inference, artifact and Provider Run mirror update/dedup behavior, durable memory proposal decision/apply flow, Codex plus Claude Code provider adapters, guarded fresh Project creation, dry-run-first Project field creation, tracker-visible claim leases, scheduler-enforced GitHub ref distributed claim locks plus text/JSON lock audit and scheduled audit workflow, Docker isolation planning/guards, Docker image readiness validation, tests, CI workflow, and durable status/orientation artifacts.
 
 Landed source/test/docs include:
 
@@ -158,7 +158,7 @@ The local Ralph run state is stale: it still records `#45` as `in_progress` and 
 The core landing and tracker reconciliation are complete. Remaining work is product hardening beyond the current local prototype:
 
 1. GitHub Project view setup is inspectable through GraphQL, including missing-view and name-drift reports. Creation and renaming remain manual because GitHub CLI/GraphQL do not expose ProjectV2 view mutations.
-2. Package the GitHub ref distributed lock path beyond the landed scheduler dispatch policy, `claim-locks` text/JSON audit, and orphan cleanup command: continuous monitoring jobs and deployed operator dashboards.
+2. Package the GitHub ref distributed lock path beyond the landed scheduler dispatch policy, `claim-locks` text/JSON audit, orphan cleanup command, and scheduled GitHub Actions audit: deployed operator dashboards.
 3. Run `pnpm ops docker:validate` against the actual hardened Docker images and provider credential packages chosen for deployment.
 4. Add more provider adapters only when a concrete provider boundary is needed beyond Codex and Claude Code.
 5. Run a live end-to-end validation after any follow-up changes:

@@ -28,6 +28,7 @@ pnpm qa
 `pnpm ops docker:validate -- --image node:22-bookworm --provider codex --require-command node,pnpm,git` runs a no-network container readiness probe for a proposed Docker execution image.
 `pnpm ops claim-locks -- --json` exposes distributed claim lock state as machine-readable JSON for monitors and dashboards.
 `pnpm ops schedule -- --dispatch --require-lock-ref` creates dispatch artifacts that force a GitHub ref claim lock at claim time.
+The `Claim Lock Audit` GitHub Actions workflow runs the distributed lock audit on a schedule and uploads `claim-locks.json`.
 `pnpm ops worktree-clean` previews stale unreferenced `.worktrees` cleanup; add `--apply` only when you want deletion.
 `pnpm verify:project` runs the repeatable readiness check: setup, tests, console smoke, GitHub auth, and Project export visibility.
 
@@ -87,7 +88,7 @@ This scaffold deliberately stops before:
 - multi-agent orchestration
 - production-grade Docker image and credential packaging
 - autonomous backlog processing
-- always-on distributed lock monitors and deployed dashboards
+- deployed distributed lock dashboards
 - memory synthesis loops
 - commit automation
 
