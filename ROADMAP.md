@@ -60,6 +60,7 @@ Execution lanes:
 
 - Scheduler is dry-run by default and writes Scheduler Plans.
 - Scheduler Plans are stored in `docs/agents/schedules/`.
+- `pnpm ops schedule -- --apply` updates GitHub Project tracker fields for `DISPATCH` decisions only.
 - `pnpm ops schedule -- --dispatch` converts `DISPATCH` decisions into local Dispatch Artifacts.
 - Review Capacity defaults to config and can be overridden per run.
 - Bug Loop work consumes capacity before new AFK dispatch.
@@ -100,7 +101,7 @@ Execution lanes:
 - `pnpm ops github:export`: export GitHub issue/project metadata into `.ai/queue.json`.
 - `pnpm ops mirror`: summarize supported local workflow artifacts into dry-run GitHub comment bodies; `--apply` posts with an explicit GitHub mutation.
 - `pnpm ops memory-propose`: create durable memory proposal artifacts without editing durable memory directly.
-- `pnpm ops schedule -- --apply`: update project fields without dispatching.
+- `pnpm ops schedule -- --apply`: update GitHub Project fields for `DISPATCH` decisions without creating dispatch artifacts.
 - `pnpm ops schedule -- --dispatch`: create dispatch artifacts from a Scheduler Plan.
 - `pnpm ops dispatch`: create audited manual dispatch artifacts, while scheduler-sourced dispatches are created by `schedule -- --dispatch`.
 - `pnpm ops claim`: file-based claim flow is implemented; a future extension can make claiming atomic across concurrent runners.

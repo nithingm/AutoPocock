@@ -31,7 +31,7 @@ pnpm test
 
 Observed result:
 
-- 183 tests passed
+- 185 tests passed
 - 0 tests failed
 
 This proves the current local source tree is internally coherent.

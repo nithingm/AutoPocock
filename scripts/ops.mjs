@@ -91,6 +91,8 @@ Usage:
   pnpm ops qa
   pnpm ops board
   pnpm ops schedule -- --queue .ai/queue.example.json
+  pnpm ops schedule -- --queue .ai/queue.json --apply
+  pnpm ops schedule -- --queue .ai/queue.json --dispatch
   pnpm ops github:init
   pnpm ops github:export
   pnpm ops ralph -- --plan docs/agents/loop-specs/plan.json
@@ -185,6 +187,11 @@ function normalizeIssueRef(value) {
 function formatIssueRef(value) {
   const normalized = normalizeIssueRef(value);
   return normalized ? `#${normalized}` : "";
+}
+
+function repoRelativePath(targetPath) {
+  const resolved = path.isAbsolute(targetPath) ? targetPath : path.join(cwd, targetPath);
+  return path.relative(cwd, resolved).replace(/\\/g, "/");
 }
 
 function formatReviewPrepCommand(issue, completionPath = "") {
@@ -1350,6 +1357,7 @@ function normalizeProjectItem(item) {
 
   return {
     id: content.number ? `#${content.number}` : item.id || "",
+    projectItemId: item.id || "",
     url: content.url || item.url || "",
     title: content.title || item.title || "",
     labels,
@@ -1365,6 +1373,155 @@ function normalizeProjectItem(item) {
     updatedAt: content.updatedAt || item.updatedAt || "",
     tracerBulletDone: false,
   };
+}
+
+function findProjectField(fields, name) {
+  return fields.find((field) => String(field.name || "").toLowerCase() === String(name).toLowerCase());
+}
+
+function findSingleSelectOption(field, value) {
+  const normalized = String(value || "").toLowerCase();
+  return (field?.options || []).find((option) => String(option.name || "").toLowerCase() === normalized);
+}
+
+async function loadProjectMutationContext(config, args, commandName) {
+  const project = configuredProjectRef(config, args);
+  const ghVersion = await commandAvailable("gh");
+  if (!ghVersion.available) {
+    throw new Error(`gh CLI is required for ${commandName}. Install it from https://cli.github.com/.`);
+  }
+
+  const auth = await commandAvailable("gh", ["auth", "status"]);
+  if (!auth.available) {
+    throw new Error(`GitHub authentication is required for ${commandName}. Run \`gh auth login\` first.`);
+  }
+
+  if (!project.owner) {
+    throw new Error(`${commandName} requires a GitHub project owner. Set github.owner in .ai/ops.config.json or pass --owner.`);
+  }
+
+  if (!project.projectNumber) {
+    throw new Error(`${commandName} requires a GitHub project number. Set github.projectNumber in .ai/ops.config.json or pass --project-number.`);
+  }
+
+  let projectId = project.projectId;
+  if (!projectId) {
+    const view = await runGh(["project", "view", project.projectNumber, "--owner", project.owner, "--format", "json"]);
+    projectId = JSON.parse(view.stdout).id || "";
+  }
+
+  if (!projectId) {
+    throw new Error(`${commandName} could not resolve the GitHub Project ID from project ${project.projectNumber}.`);
+  }
+
+  const fieldResult = await runGh(["project", "field-list", project.projectNumber, "--owner", project.owner, "--format", "json", "--limit", "100"]);
+  const fields = JSON.parse(fieldResult.stdout).fields || [];
+
+  return { project, projectId, fields };
+}
+
+function requireSingleSelectMutation(fields, fieldName, optionName, commandName) {
+  const field = findProjectField(fields, fieldName);
+  if (!field) {
+    throw new Error(`${commandName} requires Project field "${fieldName}". Add it to the GitHub Project or update .ai/ops.config.json.`);
+  }
+
+  const option = findSingleSelectOption(field, optionName);
+  if (!option) {
+    throw new Error(`${commandName} requires option "${optionName}" on Project field "${fieldName}".`);
+  }
+
+  return {
+    fieldName,
+    fieldId: field.id,
+    args: ["--field-id", field.id, "--single-select-option-id", option.id],
+  };
+}
+
+function optionalTextMutation(fields, fieldName, value) {
+  const field = findProjectField(fields, fieldName);
+  if (!field) {
+    return null;
+  }
+
+  return {
+    fieldName,
+    fieldId: field.id,
+    args: ["--field-id", field.id, "--text", value],
+  };
+}
+
+function projectItemIdFor(item) {
+  if (item.projectItemId) {
+    return item.projectItemId;
+  }
+
+  const id = String(item.id || "");
+  return id.startsWith("PVTI") ? id : "";
+}
+
+async function createScheduleTrackerUpdateContext({ config, args, dispatchable, planPath, requiresDispatchId }) {
+  if (dispatchable.length === 0) {
+    return null;
+  }
+
+  const missingProjectItems = dispatchable
+    .filter(({ item }) => !projectItemIdFor(item))
+    .map(({ item }) => item.id || item.title || "unknown item");
+  if (missingProjectItems.length > 0) {
+    throw new Error(
+      [
+        "schedule -- --apply requires queue items with GitHub Project item IDs.",
+        `Missing Project item IDs for: ${missingProjectItems.join(", ")}`,
+        "Regenerate the queue with `pnpm ops github:export -- --output .ai/queue.json` before applying scheduler state.",
+      ].join("\n"),
+    );
+  }
+
+  const { projectId, fields } = await loadProjectMutationContext(config, args, "schedule -- --apply");
+  const sharedMutations = [
+    requireSingleSelectMutation(fields, "Execution Stage", "AFK In Progress", "schedule -- --apply"),
+    requireSingleSelectMutation(fields, "Execution Lane", "Execution", "schedule -- --apply"),
+  ];
+  const lastPlanMutation = optionalTextMutation(fields, "Last Scheduler Plan", repoRelativePath(planPath));
+  if (lastPlanMutation) {
+    sharedMutations.push(lastPlanMutation);
+  }
+
+  const dispatchIdField = requiresDispatchId ? findProjectField(fields, "Dispatch ID") : null;
+  if (requiresDispatchId && !dispatchIdField) {
+    throw new Error('schedule -- --apply --dispatch requires Project field "Dispatch ID".');
+  }
+
+  return { projectId, sharedMutations, dispatchIdField };
+}
+
+async function applyScheduleTrackerUpdates({ dispatchable, dispatchIds, updateContext }) {
+  if (dispatchable.length === 0) {
+    process.stdout.write("No tracker updates were applied.\n");
+    return;
+  }
+
+  let fieldUpdates = 0;
+  for (const { item } of dispatchable) {
+    const itemId = projectItemIdFor(item);
+    const itemMutations = [...updateContext.sharedMutations];
+    const dispatchId = dispatchIds.get(item.id);
+    if (dispatchId) {
+      itemMutations.push({
+        fieldName: "Dispatch ID",
+        fieldId: updateContext.dispatchIdField.id,
+        args: ["--field-id", updateContext.dispatchIdField.id, "--text", dispatchId],
+      });
+    }
+
+    for (const mutation of itemMutations) {
+      await runGh(["project", "item-edit", "--id", itemId, "--project-id", updateContext.projectId, ...mutation.args]);
+      fieldUpdates += 1;
+    }
+  }
+
+  process.stdout.write(`Applied scheduler tracker updates for ${dispatchable.length} item(s) (${fieldUpdates} field update(s)).\n`);
 }
 
 async function gitHubExport(args) {
@@ -1613,6 +1770,7 @@ async function schedule(args) {
   const queuePath = readOption(args, "queue", config.queueFile || ".ai/queue.json");
   const capacityOverride = readOption(args, "review-capacity");
   const shouldDispatch = args.includes("--dispatch");
+  const shouldApply = args.includes("--apply");
   const requestedIssue = readOption(args, "issue");
   const queueFullPath = path.isAbsolute(queuePath) ? queuePath : path.join(cwd, queuePath);
 
@@ -1634,6 +1792,7 @@ async function schedule(args) {
     `Queue: ${queuePath}`,
     `Review capacity: ${reviewCapacity}`,
     `Dispatch mode: ${shouldDispatch ? "enabled" : "dry-run only"}`,
+    `Tracker apply mode: ${shouldApply ? "enabled" : "dry-run only"}`,
     "",
     "## Decisions",
     "",
@@ -1646,7 +1805,15 @@ async function schedule(args) {
   }
 
   lines.push("", `Remaining review capacity: ${context.remainingCapacity}`, "");
-  lines.push(shouldDispatch ? "Dispatch artifacts will be created for DISPATCH decisions only." : "No tracker state was changed and no subagents were dispatched.");
+  if (shouldDispatch && shouldApply) {
+    lines.push("Dispatch artifacts will be created and tracker fields will be updated for DISPATCH decisions only.");
+  } else if (shouldDispatch) {
+    lines.push("Dispatch artifacts will be created for DISPATCH decisions only.");
+  } else if (shouldApply) {
+    lines.push("Tracker fields will be updated for DISPATCH decisions only. No dispatch artifacts will be created.");
+  } else {
+    lines.push("No tracker state was changed and no subagents were dispatched.");
+  }
 
   const plan = `${lines.join("\n")}\n`;
   const date = nowForFile();
@@ -1677,29 +1844,42 @@ async function schedule(args) {
     }
   }
 
-  if (!shouldDispatch) {
-    return;
-  }
-
   const dispatchable = decisions.filter(({ decision }) => decision.action === "dispatch");
-  if (dispatchable.length === 0) {
-    process.stdout.write("No dispatch artifacts were created.\n");
-    return;
+  const dispatchIds = new Map();
+  const trackerUpdateContext = shouldApply
+    ? await createScheduleTrackerUpdateContext({
+        config,
+        args,
+        dispatchable,
+        planPath: target,
+        requiresDispatchId: shouldDispatch && dispatchable.length > 0,
+      })
+    : null;
+
+  if (shouldDispatch) {
+    if (dispatchable.length === 0) {
+      process.stdout.write("No dispatch artifacts were created.\n");
+    } else {
+      for (const { item } of dispatchable) {
+        const created = await createDispatchArtifact({
+          issue: item.id,
+          title: item.title,
+          source: "scheduler-plan",
+          plan: target,
+          featureTrack: item.featureTrack || "TBD",
+          queueClass: item.queueClass || "tracer-bullet",
+          risk: item.risk || "low",
+          conflictSurface: item.conflictSurface || "low",
+          isolationMode: "worktree",
+        });
+        dispatchIds.set(item.id, created.artifact.dispatch_id);
+        process.stdout.write(`${created.jsonTarget}\n${created.mdTarget}\n`);
+      }
+    }
   }
 
-  for (const { item } of dispatchable) {
-    const created = await createDispatchArtifact({
-      issue: item.id,
-      title: item.title,
-      source: "scheduler-plan",
-      plan: target,
-      featureTrack: item.featureTrack || "TBD",
-      queueClass: item.queueClass || "tracer-bullet",
-      risk: item.risk || "low",
-      conflictSurface: item.conflictSurface || "low",
-      isolationMode: "worktree",
-    });
-    process.stdout.write(`${created.jsonTarget}\n${created.mdTarget}\n`);
+  if (shouldApply) {
+    await applyScheduleTrackerUpdates({ dispatchable, dispatchIds, updateContext: trackerUpdateContext });
   }
 }
 

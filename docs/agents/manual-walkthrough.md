@@ -43,7 +43,7 @@ Use the pre-PR late-stage path when the slice is implemented but no PR exists ye
 4. `pnpm ops issues -- --prd docs/PRDs/<date>-feature-name.md`
 5. `pnpm ops handoff -- --issue <issue-number> --title "Implement slice"`
 6. `pnpm ops github:export`
-7. `pnpm ops schedule -- --dispatch`
+7. `pnpm ops schedule -- --apply --dispatch`
 8. `pnpm ops claim -- --dispatch docs/agents/dispatches/<dispatch-id>.json --claimed-by <runner-name> --isolation-mode worktree`
 9. `pnpm ops run -- --dispatch docs/agents/dispatches/<dispatch-id>.json --prepare-worktree`
 10. Implement the slice inside the prepared worktree and update the generated artifacts.
@@ -209,10 +209,10 @@ Common failure modes:
 Exact next command:
 
 ```bash
-pnpm ops schedule -- --dispatch
+pnpm ops schedule -- --apply --dispatch
 ```
 
-## 7. Generate The Scheduler Plan And Dispatch Artifacts
+## 7. Apply The Scheduler Plan And Generate Dispatch Artifacts
 
 Prerequisites:
 - `.ai/queue.json` exists.
@@ -225,17 +225,20 @@ Prerequisites:
 Command:
 
 ```bash
-pnpm ops schedule -- --dispatch
+pnpm ops schedule -- --apply --dispatch
 ```
 
 Expected artifact or output:
 - Writes a **Scheduler Plan** under `docs/agents/schedules/`.
 - Writes one or more **Dispatch Artifacts** under `docs/agents/dispatches/`.
+- Updates selected GitHub Project items to `Execution Stage = AFK In Progress` and `Execution Lane = Execution`.
+- Writes the generated `Dispatch ID` back to the Project item when the Project has that field.
 - Generated artifact filenames are timestamped; keep the scheduler plan and dispatch artifacts only when they are durable validation evidence for the slice.
 
 Common failure modes:
 - `.ai/queue.json` is missing. The command tells you to recover with `pnpm ops github:export`.
 - No issue is eligible, so the plan contains only `SKIP` entries and no **Dispatch Artifact** is created.
+- `--apply` requires queue items exported from GitHub Project data so the Project item IDs are present. Regenerate with `pnpm ops github:export` if the command reports missing IDs.
 
 Exact next command:
 

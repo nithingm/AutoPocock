@@ -54,6 +54,7 @@ The Umbrella CLI stages the workflow:
 - `pnpm ops qa`: generate generic QA from recent commits
 - `pnpm ops board`: print the board, lane, and scheduler contract
 - `pnpm ops schedule -- --queue .ai/queue.example.json`: print a dry-run Scheduler Plan
+- `pnpm ops schedule -- --queue .ai/queue.json --apply`: update GitHub Project fields for selected `DISPATCH` decisions without creating dispatch artifacts
 - `pnpm ops schedule -- --queue .ai/queue.example.json --dispatch`: create dispatch artifacts for `DISPATCH` decisions in the generated Scheduler Plan
 - `pnpm ops github:init`: print a dry-run GitHub Tracker Bootstrap report
 - `pnpm ops github:export`: export non-`Done` GitHub Project issues into `.ai/queue.json`
@@ -68,7 +69,7 @@ GitHub-backed flow depends on a real project configuration, not just local files
 
 - `pnpm ops setup` is the top-level readiness check for local structure, host environment, provider availability, and GitHub config/auth state.
 - `.ai/ops.config.json` must contain the intended GitHub owner, repo, and Project reference.
-- `gh` must be installed and authenticated before `pnpm ops github:init`, `pnpm ops github:export`, `pnpm ops mirror -- --apply`, or `pnpm ops feedback -- --apply`.
+- `gh` must be installed and authenticated before `pnpm ops github:init`, `pnpm ops github:export`, `pnpm ops schedule -- --apply`, `pnpm ops mirror -- --apply`, or `pnpm ops feedback -- --apply`.
 - `pnpm ops github:init` is a bootstrap report by default. With `-- --apply`, validated behavior is limited to creating missing canonical labels.
 - GitHub Project creation, field creation, and view creation are still manual in this version.
 - `pnpm ops board` prints the board contract only. It does not verify live GitHub schema drift.
@@ -97,15 +98,16 @@ The workflow is only coherent when each command hands off to the next artifact c
 5. `pnpm ops issues` turns that approved PRD into an Issue DAG with node metadata, dependency edges, and execution waves in `issues/`.
 6. `pnpm ops handoff` creates the slice handoff in `docs/agents/handoffs/`.
 7. `pnpm ops github:export` snapshots non-`Done` tracker items into `.ai/queue.json`.
-8. `pnpm ops schedule -- --dispatch` writes a scheduler plan, then dispatch artifacts for `DISPATCH` decisions only.
-9. `pnpm ops claim` and `pnpm ops run -- --prepare-worktree` move one dispatch into a claimed, locally prepared execution context.
-10. `pnpm ops complete` writes the completion report for the implemented slice.
-11. `pnpm ops review-prep` validates the Review Entry Gate and writes review prep only when the slice is fully described.
-12. `pnpm ops review-decision` records Solo Operator review approval or rejection against the DAG node.
-13. `pnpm ops qa` writes targeted QA output for the slice.
-14. `pnpm ops qa-decision` records QA pass or fail against the DAG node, reopens failed work into a bug loop, and unlocks dependents only when progression rules are satisfied.
-15. `pnpm ops feedback` classifies any finding as a Same-PR candidate or a new bug draft without mutating GitHub by default.
-16. `pnpm ops console` provides an artifact-first UI over Setup, Context, PRD, Graph, Execution, and Review without replacing repo truth.
+8. `pnpm ops schedule -- --apply` writes a scheduler plan, then updates tracker fields for `DISPATCH` decisions only.
+9. `pnpm ops schedule -- --dispatch` writes a scheduler plan, then dispatch artifacts for `DISPATCH` decisions only.
+10. `pnpm ops claim` and `pnpm ops run -- --prepare-worktree` move one dispatch into a claimed, locally prepared execution context.
+11. `pnpm ops complete` writes the completion report for the implemented slice.
+12. `pnpm ops review-prep` validates the Review Entry Gate and writes review prep only when the slice is fully described.
+13. `pnpm ops review-decision` records Solo Operator review approval or rejection against the DAG node.
+14. `pnpm ops qa` writes targeted QA output for the slice.
+15. `pnpm ops qa-decision` records QA pass or fail against the DAG node, reopens failed work into a bug loop, and unlocks dependents only when progression rules are satisfied.
+16. `pnpm ops feedback` classifies any finding as a Same-PR candidate or a new bug draft without mutating GitHub by default.
+17. `pnpm ops console` provides an artifact-first UI over Setup, Context, PRD, Graph, Execution, and Review without replacing repo truth.
 
 The late-stage pre-PR path is intentional:
 
@@ -157,7 +159,14 @@ Review and QA progression are now durable workflow transitions, not implicit hum
 - Full Scheduler Plans are blocked by default because they are too noisy for issue comments.
 - GitHub posting requires explicit `--apply`.
 
-## Scheduler Dispatch
+## Scheduler Apply And Dispatch
+
+`pnpm ops schedule` is dry-run-first.
+
+- It writes a Scheduler Plan before doing anything else.
+- Without `--apply` or `--dispatch`, it does not mutate GitHub or create dispatch artifacts.
+- `--apply` updates GitHub Project fields only for items that resolved to `DISPATCH`: `Execution Stage = AFK In Progress`, `Execution Lane = Execution`, and `Last Scheduler Plan` when that optional field exists.
+- `--apply` requires queue items with GitHub Project item IDs, so use `pnpm ops github:export` for the queue snapshot before applying live scheduler state.
 
 `pnpm ops schedule -- --dispatch` stays local-first.
 
@@ -165,6 +174,7 @@ Review and QA progression are now durable workflow transitions, not implicit hum
 - It creates Dispatch Artifacts only for items that resolved to `DISPATCH`.
 - It does not mutate GitHub or invoke providers.
 - Scheduler-sourced dispatch artifacts default to `worktree` isolation.
+- If `--dispatch` is combined with `--apply`, the generated `Dispatch ID` is written back to the Project item.
 - Manual `pnpm ops dispatch` requires an exact matching handoff artifact. If auto-resolution cannot find one unambiguous issue-matching handoff, pass `--handoff <exact path>` explicitly or create the handoff first.
 
 ## What You Need To Do
@@ -172,10 +182,10 @@ Review and QA progression are now durable workflow transitions, not implicit hum
 To make the whole flow work end-to-end as the Solo Operator:
 
 - Configure `.ai/ops.config.json` with the GitHub owner/repo/project reference when you want live tracker export/bootstrap behavior.
-- Install and authenticate `gh` for any GitHub-backed step such as `github:init -- --apply`, `github:export`, `mirror -- --apply`, or `feedback -- --apply`.
+- Install and authenticate `gh` for any GitHub-backed step such as `github:init -- --apply`, `github:export`, `schedule -- --apply`, `mirror -- --apply`, or `feedback -- --apply`.
 - Keep issue slices bounded enough that one handoff, one review, and one QA pass still make sense.
 - Write real handoff, completion, and review-prep artifacts instead of placeholders, because strict QA now uses that context directly.
-- Export or prepare `.ai/queue.json`, then run `pnpm ops schedule -- --dispatch` to create actual dispatch artifacts for eligible work.
+- Export or prepare `.ai/queue.json`, then run `pnpm ops schedule -- --apply` to reserve eligible work on the Project, `pnpm ops schedule -- --dispatch` to create dispatch artifacts, or both flags together when you want the generated `Dispatch ID` reflected in GitHub.
 - Claim dispatches with a stable runner identity using `pnpm ops claim`; for worktree isolation, keep the derived or explicit `worktree_path` available locally.
 - Use `pnpm ops run -- --prepare-worktree` when a claimed dispatch is worktree-isolated and you want the local directory created before any future execution layer.
 - Use `pnpm ops claim-status` to inspect old claims before restarting or recycling work.

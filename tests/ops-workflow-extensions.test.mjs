@@ -77,6 +77,9 @@ async function installFakeGh(cwd) {
 printf '%s\\n' "$*" >> "$GH_LOG"
 if [ "$1" = "--version" ]; then echo "gh version 2.0.0"; exit 0; fi
 if [ "$1" = "auth" ] && [ "$2" = "status" ]; then exit 0; fi
+if [ "$1" = "project" ] && [ "$2" = "view" ]; then echo '{"id":"PVT_fake_project"}'; exit 0; fi
+if [ "$1" = "project" ] && [ "$2" = "field-list" ]; then echo '{"fields":[{"id":"stage-field","name":"Execution Stage","options":[{"id":"afk-option","name":"AFK In Progress"}],"type":"ProjectV2SingleSelectField"},{"id":"lane-field","name":"Execution Lane","options":[{"id":"execution-option","name":"Execution"}],"type":"ProjectV2SingleSelectField"},{"id":"last-plan-field","name":"Last Scheduler Plan","type":"ProjectV2Field"},{"id":"dispatch-id-field","name":"Dispatch ID","type":"ProjectV2Field"}]}'; exit 0; fi
+if [ "$1" = "project" ] && [ "$2" = "item-edit" ]; then exit 0; fi
 if [ "$1" = "issue" ] && [ "$2" = "create" ]; then echo "https://github.com/example/repo/issues/999"; exit 0; fi
 if [ "$1" = "pr" ] && [ "$2" = "comment" ]; then echo "https://github.com/example/repo/pull/$3#issuecomment-1"; exit 0; fi
 if [ "$1" = "issue" ] && [ "$2" = "comment" ]; then echo "https://github.com/example/repo/issues/$3#issuecomment-1"; exit 0; fi
@@ -95,6 +98,15 @@ if "%1"=="--version" (
   exit /b 0
 )
 if "%1"=="auth" if "%2"=="status" exit /b 0
+if "%1"=="project" if "%2"=="view" (
+  echo {"id":"PVT_fake_project"}
+  exit /b 0
+)
+if "%1"=="project" if "%2"=="field-list" (
+  echo {"fields":[{"id":"stage-field","name":"Execution Stage","options":[{"id":"afk-option","name":"AFK In Progress"}],"type":"ProjectV2SingleSelectField"},{"id":"lane-field","name":"Execution Lane","options":[{"id":"execution-option","name":"Execution"}],"type":"ProjectV2SingleSelectField"},{"id":"last-plan-field","name":"Last Scheduler Plan","type":"ProjectV2Field"},{"id":"dispatch-id-field","name":"Dispatch ID","type":"ProjectV2Field"}]}
+  exit /b 0
+)
+if "%1"=="project" if "%2"=="item-edit" exit /b 0
 if "%1"=="issue" if "%2"=="create" (
   echo https://github.com/example/repo/issues/999
   exit /b 0
@@ -710,6 +722,122 @@ test("feedback --apply creates GitHub issues for broader bug drafts and records 
   assert.match(markdown, /GitHub issue created: https:\/\/github\.com\/example\/repo\/issues\/999/);
   assert.match(ghLog, /issue create --title/);
   assert.match(ghLog, /--body-file/);
+});
+
+test("schedule --apply updates tracker fields for dispatch decisions without creating dispatch artifacts", async () => {
+  const cwd = await makeWorkspace({
+    github: {
+      owner: "nithingm",
+      repo: "AutoPocock",
+      projectNumber: "1",
+    },
+  });
+  const fakeGh = await installFakeGh(cwd);
+  await writeFile(
+    path.join(cwd, ".ai", "queue.json"),
+    `${JSON.stringify(
+      [
+        {
+          id: "#45",
+          projectItemId: "PVTI_ready_item",
+          title: "Ready scheduler apply slice",
+          labels: ["enhancement", "ready-for-agent"],
+          stage: "Ready for Handoff",
+          lane: "Handoff",
+          featureTrack: "ops-flow",
+          queueClass: "tracer-bullet",
+          risk: "low",
+          dependency: "unblocked",
+          conflictSurface: "low",
+          tracerBulletDone: false,
+        },
+        {
+          id: "#46",
+          projectItemId: "PVTI_blocked_item",
+          title: "Blocked scheduler apply slice",
+          labels: ["enhancement", "ready-for-agent"],
+          stage: "Ready for Handoff",
+          lane: "Handoff",
+          featureTrack: "ops-flow",
+          queueClass: "tracer-bullet",
+          risk: "high",
+          dependency: "unblocked",
+          conflictSurface: "low",
+          tracerBulletDone: false,
+        },
+      ],
+      null,
+      2,
+    )}\n`,
+  );
+
+  const result = await runOps(cwd, ["schedule", "--queue", ".ai/queue.json", "--apply"], {
+    env: fakeGh.env,
+  });
+  const ghLog = await readFile(fakeGh.logPath, "utf8");
+  const dispatchEntries = await readdir(path.join(cwd, "docs", "agents", "dispatches"));
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /Tracker apply mode: enabled/);
+  assert.match(result.stdout, /DISPATCH: #45 Ready scheduler apply slice/);
+  assert.match(result.stdout, /SKIP: #46 Blocked scheduler apply slice - high risk requires Solo Operator approval/);
+  assert.match(result.stdout, /Applied scheduler tracker updates for 1 item\(s\) \(3 field update\(s\)\)\./);
+  assert.equal(dispatchEntries.length, 0);
+  assert.match(ghLog, /project view 1 --owner nithingm --format json/);
+  assert.match(ghLog, /project field-list 1 --owner nithingm --format json --limit 100/);
+  assert.match(ghLog, /project item-edit --id PVTI_ready_item --project-id PVT_fake_project --field-id stage-field --single-select-option-id afk-option/);
+  assert.match(ghLog, /project item-edit --id PVTI_ready_item --project-id PVT_fake_project --field-id lane-field --single-select-option-id execution-option/);
+  assert.match(ghLog, /project item-edit --id PVTI_ready_item --project-id PVT_fake_project --field-id last-plan-field --text docs[\\/]agents[\\/]schedules[\\/].+scheduler-plan\.md/);
+  assert.doesNotMatch(ghLog, /project item-edit .*PVTI_blocked_item/);
+});
+
+test("schedule --apply --dispatch writes generated dispatch IDs back to the tracker", async () => {
+  const cwd = await makeWorkspace({
+    github: {
+      owner: "nithingm",
+      repo: "AutoPocock",
+      projectNumber: "1",
+    },
+  });
+  const fakeGh = await installFakeGh(cwd);
+  await mkdir(path.join(cwd, "docs", "agents", "handoffs"), { recursive: true });
+  await writeFile(path.join(cwd, "docs", "agents", "handoffs", "2026-06-25-47-ready-dispatch.md"), "# Context Handoff\n");
+  await writeFile(
+    path.join(cwd, ".ai", "queue.json"),
+    `${JSON.stringify(
+      [
+        {
+          id: "#47",
+          projectItemId: "PVTI_dispatch_item",
+          title: "Ready dispatch",
+          labels: ["enhancement", "ready-for-agent"],
+          stage: "Ready for Handoff",
+          lane: "Handoff",
+          featureTrack: "ops-flow",
+          queueClass: "tracer-bullet",
+          risk: "low",
+          dependency: "unblocked",
+          conflictSurface: "low",
+          tracerBulletDone: false,
+        },
+      ],
+      null,
+      2,
+    )}\n`,
+  );
+
+  const result = await runOps(cwd, ["schedule", "--queue", ".ai/queue.json", "--apply", "--dispatch"], {
+    env: fakeGh.env,
+  });
+  const ghLog = await readFile(fakeGh.logPath, "utf8");
+  const dispatchEntries = await readdir(path.join(cwd, "docs", "agents", "dispatches"));
+  const jsonFile = dispatchEntries.find((entry) => entry.endsWith(".json"));
+  const artifact = JSON.parse(await readFile(path.join(cwd, "docs", "agents", "dispatches", jsonFile), "utf8"));
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /Dispatch artifacts will be created and tracker fields will be updated/);
+  assert.equal(artifact.issue_id, "#47");
+  assert.match(ghLog, new RegExp(`project item-edit --id PVTI_dispatch_item --project-id PVT_fake_project --field-id dispatch-id-field --text ${artifact.dispatch_id}`));
 });
 
 test("review-decision approve moves a node into QA and writes a review artifact", async () => {

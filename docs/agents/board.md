@@ -77,20 +77,28 @@ The Concurrency Scheduler should use five simple signals:
 
 ## Local Scheduler Plan
 
-The first scheduler implementation is local and dry-run only:
+The scheduler is dry-run by default:
 
 - It reads `.ai/ops.config.json`.
 - It reads `.ai/queue.json` or a file passed with `--queue`.
 - It prints planned dispatches and skipped reasons.
 - It stores Scheduler Plans in `docs/agents/schedules/`.
-- It does not mutate GitHub.
 - It does not call subagents.
+
+`pnpm ops schedule -- --apply` is the explicit tracker mutation bridge:
+
+- It still generates and stores a Scheduler Plan first.
+- It updates GitHub Project fields only for entries that resolved to `DISPATCH`.
+- It moves selected Project items to `Execution Stage = AFK In Progress` and `Execution Lane = Execution`.
+- It writes `Last Scheduler Plan` when that optional Project field exists.
+- It requires queue items with GitHub Project item IDs, so regenerate `.ai/queue.json` with `pnpm ops github:export` before applying.
 
 `pnpm ops schedule -- --dispatch` is the first bridge out of pure dry-run:
 
 - It still generates and stores a Scheduler Plan first.
 - It creates Dispatch Artifacts only for plan entries that resolved to `DISPATCH`.
 - It remains local-only and does not invoke providers or mutate GitHub.
+- When combined with `--apply`, the generated `Dispatch ID` is written back to the Project item.
 
 ## Queue Export
 
