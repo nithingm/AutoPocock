@@ -1663,8 +1663,45 @@ test("claim preserves worktree isolation and derives a worktree path when needed
 
   assert.equal(result.code, 0);
   assert.equal(artifact.claim.isolation_mode, "worktree");
+  assert.equal(artifact.claim.lease_hours, 24);
+  assert.ok(artifact.claim.expires_at);
   assert.match(artifact.worktree_path, /\.worktrees[\\/]issue-9-runner-bridge$/);
   await assert.rejects(stat(`${dispatchPath}.lock`), { code: "ENOENT" });
+});
+
+test("claim records an explicit lease expiry when lease hours are provided", async () => {
+  const cwd = await makeWorkspace();
+  const dispatchPath = path.join(cwd, "docs", "agents", "dispatches", "dispatch-lease.json");
+  await writeFile(
+    dispatchPath,
+    `${JSON.stringify(
+      {
+        dispatch_id: "dispatch-lease",
+        issue_id: "ISSUE-13",
+        title: "Lease proof",
+        status: "queued",
+        isolation_mode: "worktree",
+        worktree_path: "",
+        forbidden_actions: ["merge PR"],
+        expected_branch: "agent/issue-13-lease-proof",
+        handoff_artifact: "",
+        completion_report_target: "docs/agents/completions/dispatch-lease.md",
+        claim: null,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const result = await runOps(cwd, ["claim", "--dispatch", dispatchPath, "--claimed-by", "runner-13", "--lease-hours", "2"]);
+  const artifact = JSON.parse(await readFile(dispatchPath, "utf8"));
+  const claimedAt = new Date(artifact.claim.claimed_at);
+  const expiresAt = new Date(artifact.claim.expires_at);
+
+  assert.equal(result.code, 0);
+  assert.equal(artifact.status, "claimed");
+  assert.equal(artifact.claim.lease_hours, 2);
+  assert.equal(expiresAt.getTime() - claimedAt.getTime(), 2 * 60 * 60 * 1000);
 });
 
 test("claim resolves a queued dispatch by issue when that dispatch is unambiguous", async () => {
@@ -1824,6 +1861,42 @@ test("claim-status reports stale claimed dispatches without mutating them", asyn
   assert.match(result.stdout, /Stale: yes/);
   assert.match(result.stdout, /Solo Operator action required/);
   assert.equal(artifact.status, "claimed");
+});
+
+test("claim-status treats an expired lease as stale even within max age", async () => {
+  const cwd = await makeWorkspace();
+  const dispatchPath = path.join(cwd, "docs", "agents", "dispatches", "dispatch-expired-lease.json");
+  await writeFile(
+    dispatchPath,
+    `${JSON.stringify(
+      {
+        dispatch_id: "dispatch-expired-lease",
+        status: "claimed",
+        forbidden_actions: ["merge PR"],
+        expected_branch: "agent/expired-lease",
+        isolation_mode: "worktree",
+        worktree_path: "D:\\temp\\worktree",
+        handoff_artifact: "",
+        completion_report_target: "docs/agents/completions/dispatch-expired-lease.md",
+        claim: {
+          claimed_by: "runner-1",
+          claimed_at: "2026-06-25T00:00:00.000Z",
+          lease_hours: 1,
+          expires_at: "2026-06-25T00:00:01.000Z",
+          isolation_mode: "worktree",
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const result = await runOps(cwd, ["claim-status", "--dispatch", dispatchPath, "--max-age-hours", "100000"]);
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Lease hours: 1/);
+  assert.match(result.stdout, /Lease expires at: 2026-06-25T00:00:01.000Z/);
+  assert.match(result.stdout, /Stale: yes/);
 });
 
 test("claim-status prints exact follow-up commands when issue-based dispatch resolution is ambiguous", async () => {

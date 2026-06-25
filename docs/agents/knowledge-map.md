@@ -90,7 +90,7 @@ pnpm test
 
 Observed:
 
-- 212 tests passed
+- 214 tests passed
 - 0 tests failed
 
 Latest readiness checks recorded there:
@@ -112,6 +112,7 @@ Observed:
 - `github:init -- --apply --create-project-fields` created the missing configured optional Project fields, while continuing to report existing drift without rewriting fields
 - `run -- --prepare-docker` now exposes Docker image/workspace/network isolation plans and Docker-isolated `--execute` records a blocked Provider Run until in-container provider launch is wired
 - `claim -- --apply-tracker` can write the runner lease to the GitHub Project `Runner` field when a scheduler-created dispatch retained its `project_item_id`
+- claims now record explicit lease expiry metadata, and `claim-status` uses `expires_at` when present before falling back to max-age inspection
 - `reclaim -- --apply-tracker` can clear that Project `Runner` lease during approved reclaim recovery
 - GitHub auth is live for account `nithingm` and has sufficient Project access for the strict verifier
 - GitHub bootstrap remains dry-run-first and reports drift instead of destructive mutation
@@ -134,7 +135,7 @@ The core landing and tracker reconciliation are complete. Remaining work is prod
 
 1. Automate GitHub Project views beyond report-first bootstrap.
 2. Wire provider execution inside the prepared Docker container boundary before high-concurrency AFK execution.
-3. Replace tracker-visible claim leases with true distributed compare-and-swap locking and lease expiry for multiple runners.
+3. Replace tracker-visible claim leases with true distributed compare-and-swap locking and automated lease enforcement for multiple runners.
 4. Re-run full local tests plus strict live tracker verification after any follow-up updates.
 
 ## Continuation Brief

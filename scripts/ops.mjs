@@ -92,6 +92,7 @@ Usage:
   pnpm ops feedback -- --issue 123 --pr 456 --finding "QA finding text"
   pnpm ops dispatch -- --issue 123 --title "Implement slice" --source manual --override-reason "Solo Operator approved"
   pnpm ops claim -- --dispatch docs/agents/dispatches/dispatch-id.json --claimed-by runner-name --isolation-mode worktree
+  pnpm ops claim -- --dispatch docs/agents/dispatches/dispatch-id.json --claimed-by runner-name --lease-hours 24
   pnpm ops claim -- --dispatch docs/agents/dispatches/dispatch-id.json --claimed-by runner-name --apply-tracker
   pnpm ops claim-status -- --dispatch docs/agents/dispatches/dispatch-id.json --max-age-hours 24
   pnpm ops reclaim -- --dispatch docs/agents/dispatches/dispatch-id.json --approved-by solo-operator --reason "Runner abandoned work"
@@ -917,25 +918,47 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function parsePositiveNumber(value, fallback, label) {
+  const parsed = Number.parseFloat(value ?? "");
+  if (value == null || value === "") {
+    return fallback;
+  }
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`${label} must be a positive number.`);
+  }
+  return parsed;
+}
+
+function addHoursIso(startIso, hours) {
+  const start = new Date(startIso);
+  return new Date(start.getTime() + hours * 60 * 60 * 1000).toISOString();
+}
+
 function inspectClaimAge(artifact, maxAgeHours = 24, now = new Date()) {
   const claimedAt = artifact?.claim?.claimed_at ? new Date(artifact.claim.claimed_at) : null;
   if (!claimedAt || Number.isNaN(claimedAt.getTime())) {
     return {
       hasClaim: false,
       claimedAt: "",
+      expiresAt: "",
       ageHours: null,
       stale: false,
       maxAgeHours,
+      leaseHours: null,
     };
   }
 
   const ageHours = (now.getTime() - claimedAt.getTime()) / (1000 * 60 * 60);
+  const expiresAt = artifact?.claim?.expires_at ? new Date(artifact.claim.expires_at) : null;
+  const hasValidExpiry = expiresAt && !Number.isNaN(expiresAt.getTime());
   return {
     hasClaim: true,
     claimedAt: artifact.claim.claimed_at,
+    expiresAt: hasValidExpiry ? artifact.claim.expires_at : "",
     ageHours,
-    stale: ageHours > maxAgeHours,
+    stale: hasValidExpiry ? now.getTime() > expiresAt.getTime() : ageHours > maxAgeHours,
     maxAgeHours,
+    leaseHours: Number.isFinite(artifact.claim.lease_hours) ? artifact.claim.lease_hours : null,
   };
 }
 
@@ -2547,6 +2570,7 @@ async function claim(args) {
   const requestedDockerImage = readOption(args, "docker-image");
   const requestedDockerWorkspace = readOption(args, "docker-workspace");
   const requestedDockerNetwork = readOption(args, "docker-network");
+  const leaseHours = parsePositiveNumber(readOption(args, "lease-hours", ""), 24, "Claim --lease-hours");
   const applyTracker = args.includes("--apply-tracker");
   let claimedArtifact = null;
 
@@ -2564,6 +2588,7 @@ async function claim(args) {
     }
 
     const isolationMode = requestedIsolationMode || artifact.isolation_mode || "branch";
+    const claimedAt = nowIso();
 
     if (artifact.isolation_mode && artifact.isolation_mode !== isolationMode) {
       throw new Error(
@@ -2574,7 +2599,9 @@ async function claim(args) {
     artifact.status = "claimed";
     artifact.claim = {
       claimed_by: claimedBy,
-      claimed_at: nowIso(),
+      claimed_at: claimedAt,
+      lease_hours: leaseHours,
+      expires_at: addHoursIso(claimedAt, leaseHours),
       isolation_mode: isolationMode,
     };
 
@@ -2614,9 +2641,9 @@ async function claim(args) {
 }
 
 async function claimStatus(args) {
-  const maxAgeHours = Number.parseFloat(readOption(args, "max-age-hours", "24"));
+  const maxAgeHours = parsePositiveNumber(readOption(args, "max-age-hours", "24"), 24, "claim-status --max-age-hours");
   const { fullPath, artifact } = await resolveDispatchArtifact(args, { command: "claim-status", status: "claimed" });
-  const inspection = inspectClaimAge(artifact, Number.isFinite(maxAgeHours) ? maxAgeHours : 24);
+  const inspection = inspectClaimAge(artifact, maxAgeHours);
 
   const lines = [
     "# Claim Status",
@@ -2626,6 +2653,8 @@ async function claimStatus(args) {
     `Isolation mode: ${artifact.isolation_mode || "unset"}`,
     `Claimed by: ${artifact.claim?.claimed_by || "N/A"}`,
     `Claimed at: ${inspection.claimedAt || "N/A"}`,
+    `Lease hours: ${inspection.leaseHours == null ? "N/A" : inspection.leaseHours}`,
+    `Lease expires at: ${inspection.expiresAt || "N/A"}`,
     `Max age hours: ${inspection.maxAgeHours}`,
     `Current age hours: ${inspection.ageHours == null ? "N/A" : inspection.ageHours.toFixed(2)}`,
     `Stale: ${inspection.stale ? "yes" : "no"}`,
@@ -2641,7 +2670,7 @@ async function claimStatus(args) {
 async function reclaim(args) {
   const approvedBy = readOption(args, "approved-by");
   const reason = readOption(args, "reason");
-  const maxAgeHours = Number.parseFloat(readOption(args, "max-age-hours", "24"));
+  const maxAgeHours = parsePositiveNumber(readOption(args, "max-age-hours", "24"), 24, "reclaim --max-age-hours");
   const applyTracker = args.includes("--apply-tracker");
   let reclaimedArtifact = null;
 
@@ -2662,7 +2691,7 @@ async function reclaim(args) {
       throw new Error(`Dispatch ${artifact.dispatch_id || fullPath} is ${artifact.status}, not claimed.`);
     }
 
-    const inspection = inspectClaimAge(artifact, Number.isFinite(maxAgeHours) ? maxAgeHours : 24);
+    const inspection = inspectClaimAge(artifact, maxAgeHours);
     const historyEntry = {
       ...artifact.claim,
       reclaimed_at: nowIso(),
