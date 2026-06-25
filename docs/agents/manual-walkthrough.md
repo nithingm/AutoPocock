@@ -173,7 +173,7 @@ pnpm ops handoff -- --issue <issue-number> --title "Implement slice"
 
 Expected artifact or output:
 - Writes a **Context Handoff** under `docs/agents/handoffs/`.
-- Example verified output in this repo: `docs/agents/handoffs/2026-05-14-3-canonical-manual-walkthrough.md`
+- Committed example shape: `docs/agents/handoffs/2026-05-14-23-prove-the-end-to-end-operating-system-tracer-bullet.md`
 
 Common failure modes:
 - The generated handoff is still a template until you fill in goal, boundaries, context, dependencies, and verification.
@@ -231,7 +231,7 @@ pnpm ops schedule -- --dispatch
 Expected artifact or output:
 - Writes a **Scheduler Plan** under `docs/agents/schedules/`.
 - Writes one or more **Dispatch Artifacts** under `docs/agents/dispatches/`.
-- Example verified output in this repo created `docs/agents/schedules/2026-05-14T17-30-05-382Z-scheduler-plan.md`, `docs/agents/dispatches/dispatch-2026-05-14T17-30-05-386Z-1.json`, and `docs/agents/dispatches/dispatch-2026-05-14T17-30-05-386Z-1.md`.
+- Generated artifact filenames are timestamped; keep the scheduler plan and dispatch artifacts only when they are durable validation evidence for the slice.
 
 Common failure modes:
 - `.ai/queue.json` is missing. The command tells you to recover with `pnpm ops github:export`.
@@ -313,7 +313,7 @@ pnpm ops complete -- --issue <issue-number> --status "needs human review"
 
 Expected artifact or output:
 - Writes a **Completion Report** under `docs/agents/completions/`.
-- Example verified output in this repo: `docs/agents/completions/2026-05-14-3-completion.md`
+- Committed example shape: `docs/agents/completions/2026-05-15-49-completion.md`
 
 Common failure modes:
 - The generated file is only a template until you replace every `REQUIRED` placeholder.
@@ -339,7 +339,7 @@ pnpm ops review-prep -- --issue <issue-number> --acceptance "<criterion 1>|<crit
 
 Expected artifact or output:
 - Writes **Review Prep** under `docs/agents/reviews/`.
-- Example verified output in this repo: `docs/agents/reviews/2026-05-14-3-review-prep.md`
+- Generated review prep artifacts are timestamped and issue-scoped; commit them only when they are durable review evidence.
 - `--pr` is optional. Add it only when a PR already exists and you want the review artifact to carry that reference.
 
 Common failure modes:
