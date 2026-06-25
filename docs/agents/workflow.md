@@ -52,6 +52,7 @@ The Umbrella CLI stages the workflow:
 - `pnpm ops claim -- --dispatch docs/agents/dispatches/dispatch-id.json --claimed-by runner-name --apply-tracker`: claim locally, then write the runner lease into the GitHub Project `Runner` field when the dispatch artifact has `project_item_id`
 - `pnpm ops claim-status -- --dispatch docs/agents/dispatches/dispatch-id.json --max-age-hours 24`: inspect whether a claimed dispatch looks stale
 - `pnpm ops reclaim -- --dispatch docs/agents/dispatches/dispatch-id.json --approved-by solo-operator --reason "Runner abandoned work"`: explicitly return a claimed dispatch to `queued`
+- `pnpm ops reclaim -- --dispatch docs/agents/dispatches/dispatch-id.json --approved-by solo-operator --reason "Runner abandoned work" --apply-tracker`: reclaim locally, then clear the GitHub Project `Runner` field when the dispatch artifact has `project_item_id`
 - `pnpm ops qa -- --issue 123`: generate targeted QA for tracked work; add `--pr 456` only when a PR already exists and you want it called out in the checklist
 - `pnpm ops qa`: generate generic QA from recent commits
 - `pnpm ops board`: print the board, lane, and scheduler contract
@@ -217,7 +218,7 @@ To make the whole flow work end-to-end as the Solo Operator:
 - Use `pnpm ops dispatch -- --isolation-mode docker --docker-image node:22-bookworm ...` or claim an existing Docker dispatch, then run `pnpm ops run -- --prepare-docker` to inspect the exact Docker command. `--execute` records a blocked Provider Run for Docker dispatches until provider launch is actually wired inside the container.
 - Use `pnpm ops worktree-clean` periodically to remove old unreferenced `.worktrees` directories; referenced dispatches and Provider Runs are always kept by that command.
 - Use `pnpm ops claim-status` to inspect old claims before restarting or recycling work.
-- Use `pnpm ops reclaim` only when you have decided the old claim should be abandoned; the reclaim command records that approval locally.
+- Use `pnpm ops reclaim` only when you have decided the old claim should be abandoned; the reclaim command records that approval locally. Add `--apply-tracker` when a tracker-visible runner lease should be cleared from the Project item.
 - Use `pnpm ops run` as the final local validation step before any future provider execution layer.
 - Use `pnpm ops qa` and `pnpm ops feedback` after implementation so QA context and bug-vs-same-PR decisions are explicit.
 

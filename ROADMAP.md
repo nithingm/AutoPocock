@@ -67,7 +67,7 @@ Execution lanes:
 - Conflict Surface is manually declared first, with opt-in CLI inference from queue write surfaces and active PR files.
 - Initial dispatch creates Dispatch Artifacts instead of calling subagents.
 - Dispatch Artifacts are JSON canonical plus markdown mirror.
-- Dispatch Claims use local filesystem locks around claim/reclaim mutations, and `claim --apply-tracker` can publish the runner lease to the GitHub Project `Runner` field for external visibility; true distributed arbitration remains a future hardening layer.
+- Dispatch Claims use local filesystem locks around claim/reclaim mutations. `claim --apply-tracker` publishes the runner lease to the GitHub Project `Runner` field for external visibility, and `reclaim --apply-tracker` clears that visible lease during approved recovery. True distributed arbitration remains a future hardening layer.
 
 ## Agent Execution Direction
 
@@ -118,7 +118,7 @@ Execution lanes:
 - How much of GitHub Project view setup should be automated beyond the current report-first contract; Project creation and field creation now have explicit apply paths.
 - Additional provider adapters beyond Codex and Claude Code, if the product boundary expands to more CLIs or hosted runners.
 - Containerized provider launch, host credential policy, and writable workspace lifecycle for Docker-isolated runs.
-- How to extend tracker-visible claim leases into true distributed compare-and-swap locking, lease expiry, and recovery for multiple runners.
+- How to extend tracker-visible claim leases into true distributed compare-and-swap locking and lease expiry for multiple runners.
 - How approved repo-local Durable Memory decisions should sync into external/user-level memory stores, if that becomes part of the product boundary.
 
 ## Locked GitHub Bootstrap Decisions

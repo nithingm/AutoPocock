@@ -95,6 +95,7 @@ Usage:
   pnpm ops claim -- --dispatch docs/agents/dispatches/dispatch-id.json --claimed-by runner-name --apply-tracker
   pnpm ops claim-status -- --dispatch docs/agents/dispatches/dispatch-id.json --max-age-hours 24
   pnpm ops reclaim -- --dispatch docs/agents/dispatches/dispatch-id.json --approved-by solo-operator --reason "Runner abandoned work"
+  pnpm ops reclaim -- --dispatch docs/agents/dispatches/dispatch-id.json --approved-by solo-operator --reason "Runner abandoned work" --apply-tracker
   pnpm ops qa -- --issue 123 --pr 456
   pnpm ops qa
   pnpm ops board
@@ -1776,6 +1777,19 @@ function requireTextMutation(fields, fieldName, value, commandName) {
   return mutation;
 }
 
+function requireClearMutation(fields, fieldName, commandName) {
+  const field = findProjectField(fields, fieldName);
+  if (!field) {
+    throw new Error(`${commandName} requires Project field "${fieldName}". Add it to the GitHub Project or update .ai/ops.config.json.`);
+  }
+
+  return {
+    fieldName,
+    fieldId: field.id,
+    args: ["--field-id", field.id, "--clear"],
+  };
+}
+
 function projectItemIdFor(item) {
   if (item.projectItemId) {
     return item.projectItemId;
@@ -1858,6 +1872,17 @@ async function applyClaimTrackerLease({ config, args, artifact, runner }) {
   const runnerMutation = requireTextMutation(fields, "Runner", runner, "claim -- --apply-tracker");
   await runGh(["project", "item-edit", "--id", artifact.project_item_id, "--project-id", projectId, ...runnerMutation.args]);
   process.stdout.write(`Applied tracker claim lease for ${artifact.dispatch_id} to Runner=${runner}.\n`);
+}
+
+async function clearClaimTrackerLease({ config, args, artifact }) {
+  if (!artifact?.project_item_id) {
+    throw new Error("reclaim -- --apply-tracker requires the dispatch artifact to include project_item_id. Regenerate the dispatch from `pnpm ops schedule -- --dispatch` using a GitHub-exported queue.");
+  }
+
+  const { projectId, fields } = await loadProjectMutationContext(config, args, "reclaim -- --apply-tracker");
+  const runnerMutation = requireClearMutation(fields, "Runner", "reclaim -- --apply-tracker");
+  await runGh(["project", "item-edit", "--id", artifact.project_item_id, "--project-id", projectId, ...runnerMutation.args]);
+  process.stdout.write(`Cleared tracker claim lease for ${artifact.dispatch_id} from Runner.\n`);
 }
 
 async function gitHubExport(args) {
@@ -2617,6 +2642,8 @@ async function reclaim(args) {
   const approvedBy = readOption(args, "approved-by");
   const reason = readOption(args, "reason");
   const maxAgeHours = Number.parseFloat(readOption(args, "max-age-hours", "24"));
+  const applyTracker = args.includes("--apply-tracker");
+  let reclaimedArtifact = null;
 
   if (!approvedBy) {
     throw new Error("Reclaim requires --approved-by.");
@@ -2648,7 +2675,18 @@ async function reclaim(args) {
     const reclaimed = reclaimDispatchArtifact(artifact, historyEntry);
 
     await writeFile(fullPath, `${JSON.stringify(reclaimed, null, 2)}\n`, "utf8");
+    reclaimedArtifact = reclaimed;
   });
+
+  if (applyTracker) {
+    const config = await loadJson(".ai/ops.config.json");
+    await clearClaimTrackerLease({
+      config,
+      args,
+      artifact: reclaimedArtifact,
+    });
+  }
+
   process.stdout.write(`${fullPath}\n`);
   process.stdout.write(`Reclaimed by ${approvedBy}. Dispatch returned to queued.\n`);
 }

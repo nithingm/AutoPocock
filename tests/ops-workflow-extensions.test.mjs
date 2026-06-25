@@ -1123,6 +1123,67 @@ test("claim --apply-tracker writes the claimed runner to the GitHub Project item
   assert.match(ghLog, /project item-edit --id PVTI_claim_item --project-id PVT_fake_project --field-id runner-field --text runner-a/);
 });
 
+test("reclaim --apply-tracker clears the claimed runner from the GitHub Project item", async () => {
+  const cwd = await makeWorkspace({
+    github: {
+      owner: "nithingm",
+      repo: "AutoPocock",
+      projectNumber: "1",
+    },
+  });
+  const fakeGh = await installFakeGh(cwd);
+  const dispatchPath = path.join(cwd, "docs", "agents", "dispatches", "dispatch-reclaim-lease.json");
+  await writeFile(
+    dispatchPath,
+    `${JSON.stringify(
+      {
+        dispatch_id: "dispatch-reclaim-lease",
+        issue_id: "#49",
+        title: "Reclaim lease proof",
+        status: "claimed",
+        forbidden_actions: ["merge PR"],
+        expected_branch: "agent/49-reclaim-lease-proof",
+        isolation_mode: "worktree",
+        worktree_path: path.join(cwd, ".worktrees", "49-reclaim-lease-proof"),
+        project_item_id: "PVTI_reclaim_item",
+        handoff_artifact: "docs/agents/handoffs/49.md",
+        completion_report_target: "docs/agents/completions/dispatch-reclaim-lease.md",
+        claim: {
+          claimed_by: "runner-a",
+          claimed_at: "2026-06-25T00:00:00.000Z",
+          isolation_mode: "worktree",
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const result = await runOps(cwd, [
+    "reclaim",
+    "--dispatch",
+    dispatchPath,
+    "--approved-by",
+    "solo-operator",
+    "--reason",
+    "Runner abandoned work",
+    "--apply-tracker",
+  ], {
+    env: fakeGh.env,
+  });
+  const artifact = JSON.parse(await readFile(dispatchPath, "utf8"));
+  const ghLog = await readFile(fakeGh.logPath, "utf8");
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(artifact.status, "queued");
+  assert.equal(artifact.claim, null);
+  assert.equal(artifact.claim_history[0].claimed_by, "runner-a");
+  assert.match(result.stdout, /Cleared tracker claim lease for dispatch-reclaim-lease from Runner/);
+  assert.match(ghLog, /project view 1 --owner nithingm --format json/);
+  assert.match(ghLog, /project field-list 1 --owner nithingm --format json --limit 100/);
+  assert.match(ghLog, /project item-edit --id PVTI_reclaim_item --project-id PVT_fake_project --field-id runner-field --clear/);
+});
+
 test("review-decision approve moves a node into QA and writes a review artifact", async () => {
   const cwd = await makeWorkspace();
   const dagPath = await writeDagFixture(cwd);
