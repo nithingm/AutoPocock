@@ -118,6 +118,14 @@ export function validateClaimedDispatchForRun(artifact) {
   if (artifact.isolation_mode === "worktree" && !artifact.worktree_path) {
     errors.push("Worktree dispatch is missing worktree_path.");
   }
+  if (artifact.isolation_mode === "docker") {
+    if (!artifact.worktree_path) {
+      errors.push("Docker dispatch is missing worktree_path.");
+    }
+    if (!artifact.docker?.image || !artifact.docker?.workspace) {
+      errors.push("Docker dispatch is missing docker image or workspace.");
+    }
+  }
   if (!Array.isArray(artifact.forbidden_actions) || artifact.forbidden_actions.length === 0) {
     errors.push("Dispatch is missing forbidden_actions.");
   }
@@ -181,6 +189,7 @@ export function buildLoopSpec({ dispatch, handoffMarkdown }) {
       isolation_mode: dispatch.isolation_mode,
       expected_branch: dispatch.expected_branch,
       worktree_path: dispatch.worktree_path || "",
+      docker: dispatch.docker || null,
       claimed_by: dispatch.claim?.claimed_by || "",
       retry_budget: 1,
       escalation_rules: [

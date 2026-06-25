@@ -64,6 +64,7 @@ The Umbrella CLI stages the workflow:
 - `pnpm ops github:export`: export non-`Done` GitHub Project issues into `.ai/queue.json`
 - `pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json`: validate a claimed dispatch without invoking a provider
 - `pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --prepare-worktree`: prepare the local worktree directory for a claimed worktree dispatch, then print the Runner Plan
+- `pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --prepare-docker`: prepare the local worktree directory for a claimed Docker dispatch, print the Docker image/workspace/network command, and do not invoke a provider
 - `pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --execute`: execute from the approved Loop Spec, persist Provider Run metadata plus stdout/stderr logs, and enforce runtime stop/escalation conditions
 - `pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --execute --live-provider --provider claude`: run the same provider-neutral Loop Spec through the Claude Code adapter instead of the default Codex adapter
 - `pnpm ops worktree-clean -- --max-age-hours 168`: preview stale unreferenced `.worktrees` cleanup; add `--apply` to delete only the listed unreferenced directories
@@ -107,7 +108,7 @@ The workflow is only coherent when each command hands off to the next artifact c
 7. `pnpm ops github:export` snapshots non-`Done` tracker items into `.ai/queue.json`.
 8. `pnpm ops schedule -- --apply` writes a scheduler plan, then updates tracker fields for `DISPATCH` decisions only.
 9. `pnpm ops schedule -- --dispatch` writes a scheduler plan, then dispatch artifacts for `DISPATCH` decisions only.
-10. `pnpm ops claim` and `pnpm ops run -- --prepare-worktree` move one dispatch into a claimed, locally prepared execution context.
+10. `pnpm ops claim` plus `pnpm ops run -- --prepare-worktree` or `pnpm ops run -- --prepare-docker` move one dispatch into a claimed, locally prepared execution context.
 11. `pnpm ops complete` writes the completion report for the implemented slice.
 12. `pnpm ops review-prep` validates the Review Entry Gate and writes review prep only when the slice is fully described.
 13. `pnpm ops review-decision` records Solo Operator review approval or rejection against the DAG node.
@@ -212,6 +213,7 @@ To make the whole flow work end-to-end as the Solo Operator:
 - Export or prepare `.ai/queue.json`, then run `pnpm ops schedule -- --apply` to reserve eligible work on the Project, `pnpm ops schedule -- --dispatch` to create dispatch artifacts, or both flags together when you want the generated `Dispatch ID` reflected in GitHub.
 - Claim dispatches with a stable runner identity using `pnpm ops claim`; the command uses an exclusive local dispatch-artifact lock and re-reads state before mutation. For worktree isolation, keep the derived or explicit `worktree_path` available locally.
 - Use `pnpm ops run -- --prepare-worktree` when a claimed dispatch is worktree-isolated and you want the local directory created before any future execution layer.
+- Use `pnpm ops dispatch -- --isolation-mode docker --docker-image node:22-bookworm ...` or claim an existing Docker dispatch, then run `pnpm ops run -- --prepare-docker` to inspect the exact Docker command. `--execute` records a blocked Provider Run for Docker dispatches until provider launch is actually wired inside the container.
 - Use `pnpm ops worktree-clean` periodically to remove old unreferenced `.worktrees` directories; referenced dispatches and Provider Runs are always kept by that command.
 - Use `pnpm ops claim-status` to inspect old claims before restarting or recycling work.
 - Use `pnpm ops reclaim` only when you have decided the old claim should be abandoned; the reclaim command records that approval locally.

@@ -71,9 +71,9 @@ Execution lanes:
 
 ## Agent Execution Direction
 
-- Current stub uses branch isolation.
+- Current stub supports branch, worktree, and guarded Docker isolation planning.
 - Once the scheduler exists, default to worktree-first isolation.
-- Docker isolation is required before high-concurrency AFK execution.
+- Docker-isolated dispatches have an explicit image/workspace/network contract and `--prepare-docker` plan, while actual provider launch inside the container remains future hardening before high-concurrency AFK execution.
 - Provider-specific subagent execution belongs in a runner layer.
 - Runners must claim Dispatch Artifacts before execution.
 - Stale claims return to `queued` only with Solo Operator approval or future timeout policy.
@@ -107,7 +107,7 @@ Execution lanes:
 - `pnpm ops schedule -- --dispatch`: create dispatch artifacts from a Scheduler Plan.
 - `pnpm ops dispatch`: create audited manual dispatch artifacts, while scheduler-sourced dispatches are created by `schedule -- --dispatch`.
 - `pnpm ops claim`: local file-backed claiming uses an exclusive dispatch-artifact lock and re-reads state before mutation.
-- `pnpm ops run`: validate claimed dispatches, prepare worktrees, and execute through stub/live provider boundaries; Codex is the default live provider and Claude Code can be selected with `--provider claude`; a future extension can harden external runner deployment.
+- `pnpm ops run`: validate claimed dispatches, prepare worktrees, prepare Docker isolation plans, and execute through stub/live provider boundaries; Codex is the default live provider and Claude Code can be selected with `--provider claude`; Docker-isolated execution currently blocks before provider launch until containerized provider execution is wired.
 - `pnpm ops worktree-clean`: dry-run-first cleanup for stale unreferenced `.worktrees` directories; deletion requires `--apply`.
 - `pnpm ops review-prep`: validate Review Entry Gate inputs and generate advisory Review Prep when the gate passes.
 - `pnpm ops qa`: load issue, PR, handoff, completion, and review prep context from GitHub.
@@ -117,7 +117,7 @@ Execution lanes:
 
 - How much of GitHub Project view setup should be automated beyond the current report-first contract; Project creation and field creation now have explicit apply paths.
 - Additional provider adapters beyond Codex and Claude Code, if the product boundary expands to more CLIs or hosted runners.
-- Docker image contract and mounted workspace layout.
+- Containerized provider launch, host credential policy, and writable workspace lifecycle for Docker-isolated runs.
 - How to extend Dispatch Claim locking beyond local filesystem coordination for distributed runners.
 - How approved repo-local Durable Memory decisions should sync into external/user-level memory stores, if that becomes part of the product boundary.
 

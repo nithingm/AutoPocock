@@ -19,7 +19,7 @@ For the explicit completion audit against the active objective, use `docs/agents
 
 AutoPocock has crossed from a manual agentic repo template into a local, test-backed prototype of a provider-agnostic AI engineering operating system.
 
-The committed baseline on `origin/main` now includes the manual OS and the provider/DAG/Ralph automation layer: PRD creation, issue decomposition, handoff artifacts, GitHub bootstrap/export, scheduling, dispatch artifacts, claiming, runner preparation, completion reports, review prep, targeted QA, feedback classification, setup/context/PRD planes, layered DAG planning, DAG regeneration, DAG-to-GitHub sync and reconciliation, DAG quality gates, provider-neutral loop specs, wave approval, preflight validation, graph progression, repair insertion, Ralph pause/freeze policy, provider runs, Codex and Claude Code provider adapters, and an artifact-first workflow console.
+The committed baseline on `origin/main` now includes the manual OS and the provider/DAG/Ralph automation layer: PRD creation, issue decomposition, handoff artifacts, GitHub bootstrap/export, scheduling, dispatch artifacts, claiming, runner preparation, Docker isolation planning and execution guards, completion reports, review prep, targeted QA, feedback classification, setup/context/PRD planes, layered DAG planning, DAG regeneration, DAG-to-GitHub sync and reconciliation, DAG quality gates, provider-neutral loop specs, wave approval, preflight validation, graph progression, repair insertion, Ralph pause/freeze policy, provider runs, Codex and Claude Code provider adapters, and an artifact-first workflow console.
 
 ## Verification Snapshot
 
@@ -31,7 +31,7 @@ pnpm test
 
 Observed result:
 
-- 207 tests passed
+- 210 tests passed
 - 0 tests failed
 
 This proves the current local source tree is internally coherent.
@@ -66,7 +66,7 @@ Current branch:
 - latest commits include the PR `#56` merge and post-merge status/verifier updates
 - merged PR: `https://github.com/nithingm/AutoPocock/pull/56`
 
-The landed baseline includes the manual OS, original GitHub-backed workflow hardening, automation-layer implementation, opt-in scheduler conflict inference, artifact and Provider Run mirror update/dedup behavior, durable memory proposal decision/apply flow, Codex plus Claude Code provider adapters, guarded fresh Project creation, dry-run-first Project field creation, tests, CI workflow, and durable status/orientation artifacts.
+The landed baseline includes the manual OS, original GitHub-backed workflow hardening, automation-layer implementation, opt-in scheduler conflict inference, artifact and Provider Run mirror update/dedup behavior, durable memory proposal decision/apply flow, Codex plus Claude Code provider adapters, guarded fresh Project creation, dry-run-first Project field creation, Docker isolation planning/guards, tests, CI workflow, and durable status/orientation artifacts.
 
 Landed source/test/docs include:
 
@@ -158,7 +158,7 @@ The local Ralph run state is stale: it still records `#45` as `in_progress` and 
 The core landing and tracker reconciliation are complete. Remaining work is product hardening beyond the current local prototype:
 
 1. Automate GitHub Project view setup beyond the current report-first bootstrap contract.
-2. Add Docker runner isolation before high-concurrency AFK execution.
+2. Wire provider execution inside the prepared Docker container boundary before high-concurrency AFK execution.
 3. Extend dispatch claim locking beyond local filesystem coordination for distributed runners.
 4. Decide whether approved repo-local Durable Memory decisions should sync into external/user-level memory stores.
 5. Add more provider adapters only when a concrete provider boundary is needed beyond Codex and Claude Code.

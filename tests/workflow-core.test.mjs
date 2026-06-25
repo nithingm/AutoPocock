@@ -121,3 +121,45 @@ test("workflow core owns reclaim and runnable-dispatch validation rules", () => 
   assert.equal(reclaimed.claim_history.length, 1);
   assert.equal(reclaimed.claim_history[0].reclaimed_by, "solo-operator");
 });
+
+test("workflow core preserves Docker isolation contracts in Loop Specs", () => {
+  const dispatch = {
+    dispatch_id: "dispatch-docker",
+    issue_id: "57",
+    title: "Docker runner proof",
+    status: "claimed",
+    isolation_mode: "docker",
+    expected_branch: "agent/57-docker-runner-proof",
+    worktree_path: "d:\\Projects\\AutoPocock\\.worktrees\\57-docker-runner-proof",
+    docker: {
+      image: "node:22-bookworm",
+      workspace: "/workspace",
+      network: "none",
+      container_name: "autopocock-57-docker-runner-proof",
+    },
+    forbidden_actions: ["merge PR"],
+    allowed_commands: ["run relevant tests"],
+    handoff_artifact: "docs/agents/handoffs/57.md",
+    completion_report_target: "docs/agents/completions/dispatch-docker.md",
+    claim: {
+      claimed_by: "runner-57",
+      claimed_at: "2026-05-14T00:00:00.000Z",
+      isolation_mode: "docker",
+    },
+  };
+
+  assert.deepEqual(validateClaimedDispatchForRun(dispatch), []);
+
+  const loopSpec = buildLoopSpec({
+    dispatch,
+    handoffMarkdown: `# Context Handoff
+
+## Goal
+
+- Prove Docker isolation planning.
+`,
+  });
+
+  assert.equal(loopSpec.execution_contract.isolation_mode, "docker");
+  assert.deepEqual(loopSpec.execution_contract.docker, dispatch.docker);
+});

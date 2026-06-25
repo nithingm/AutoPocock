@@ -806,6 +806,116 @@ test("run --execute persists a blocked Provider Run when required handoff contex
   assert.match(completion, /required handoff artifact was missing/);
 });
 
+test("run --prepare-docker prints a Docker isolation plan without invoking a provider", async () => {
+  const cwd = await makeWorkspace();
+  const worktreePath = path.join(cwd, ".worktrees", "docker-runner-proof");
+  const dispatchPath = path.join(cwd, "docs", "agents", "dispatches", "dispatch-docker.json");
+  await writeFile(
+    dispatchPath,
+    `${JSON.stringify(
+      {
+        dispatch_id: "dispatch-docker",
+        issue_id: "57",
+        title: "Docker runner proof",
+        status: "claimed",
+        forbidden_actions: ["merge PR", "handle secrets"],
+        expected_branch: "agent/57-docker-runner-proof",
+        isolation_mode: "docker",
+        worktree_path: worktreePath,
+        docker: {
+          image: "node:22-bookworm",
+          workspace: "/workspace",
+          network: "none",
+          container_name: "autopocock-57-docker-runner-proof",
+        },
+        handoff_artifact: "docs/agents/handoffs/docker.md",
+        completion_report_target: "docs/agents/completions/dispatch-docker-completion.md",
+        claim: {
+          claimed_by: "docker-runner",
+          claimed_at: "2026-05-14T00:00:00.000Z",
+          isolation_mode: "docker",
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const result = await runOps(cwd, ["run", "--dispatch", dispatchPath, "--prepare-docker"]);
+
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Docker image: node:22-bookworm/);
+  assert.match(result.stdout, /Docker workspace: \/workspace/);
+  assert.match(result.stdout, /Docker network: none/);
+  assert.match(result.stdout, /Docker available: (yes|no)/);
+  assert.match(result.stdout, /Docker command: docker run --rm -t --name autopocock-57-docker-runner-proof/);
+  assert.match(result.stdout, /No provider was invoked\. Docker isolation plan was prepared/);
+  assert.ok((await stat(worktreePath)).isDirectory());
+});
+
+test("run --execute blocks Docker dispatches until container execution is wired", async () => {
+  const cwd = await makeWorkspace();
+  const handoffPath = path.join(cwd, "docs", "agents", "handoffs", "2026-05-14-57-docker.md");
+  const completionPath = path.join(cwd, "docs", "agents", "completions", "dispatch-docker-completion.md");
+  const dispatchPath = path.join(cwd, "docs", "agents", "dispatches", "dispatch-docker.json");
+  await writeFile(
+    handoffPath,
+    `# Context Handoff
+
+## Goal
+
+- Prove Docker runner isolation guardrails.
+`,
+  );
+  await writeFile(
+    dispatchPath,
+    `${JSON.stringify(
+      {
+        dispatch_id: "dispatch-docker",
+        issue_id: "57",
+        title: "Docker runner proof",
+        status: "claimed",
+        forbidden_actions: ["merge PR", "handle secrets"],
+        expected_branch: "agent/57-docker-runner-proof",
+        isolation_mode: "docker",
+        worktree_path: path.join(cwd, ".worktrees", "docker-runner-proof"),
+        docker: {
+          image: "node:22-bookworm",
+          workspace: "/workspace",
+          network: "none",
+          container_name: "autopocock-57-docker-runner-proof",
+        },
+        handoff_artifact: handoffPath,
+        completion_report_target: completionPath,
+        claim: {
+          claimed_by: "docker-runner",
+          claimed_at: "2026-05-14T00:00:00.000Z",
+          isolation_mode: "docker",
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const result = await runOps(cwd, ["run", "--dispatch", dispatchPath, "--execute"]);
+  const providerRunDir = path.join(cwd, ".ai", "provider-runs");
+  const providerRunFiles = await readdir(providerRunDir);
+  const metadataFile = providerRunFiles.find((entry) => /^provider-run-.*\.json$/.test(entry) && !entry.includes("-bundle."));
+  const bundleFile = providerRunFiles.find((entry) => entry.includes("-bundle.json"));
+  const metadata = JSON.parse(await readFile(path.join(providerRunDir, metadataFile), "utf8"));
+  const bundle = JSON.parse(await readFile(path.join(providerRunDir, bundleFile), "utf8"));
+  const completion = await readFile(completionPath, "utf8");
+
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Provider Run status: blocked/);
+  assert.equal(metadata.status, "blocked");
+  assert.equal(metadata.runtime.stop_condition, "containerized execution boundary not implemented");
+  assert.equal(metadata.runtime.docker.image, "node:22-bookworm");
+  assert.equal(bundle.execution.docker.image, "node:22-bookworm");
+  assert.match(completion, /Docker container execution is not wired yet/);
+});
+
 test("run --execute --live-provider --detach launches a background worker and run-status reports completion", async () => {
   const cwd = await makeWorkspace();
   const fakeCodexPath = path.join(cwd, "fake-codex-detached.mjs");

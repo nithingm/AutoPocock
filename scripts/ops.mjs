@@ -109,6 +109,7 @@ Usage:
   pnpm ops ralph -- --plan docs/agents/loop-specs/plan.json --approve-wave wave-0 --approved-by solo-operator
   pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json
   pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --prepare-worktree
+  pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --prepare-docker
   pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --execute
   pnpm ops console -- --port 4173 --host 127.0.0.1
   pnpm ops run-status -- --run .ai/provider-runs/provider-run-id.json
@@ -176,6 +177,77 @@ function slugify(value) {
 function deriveWorktreePath(issue, title) {
   const base = `${slugify(issue)}-${slugify(title)}` || "dispatch";
   return path.join(cwd, ".worktrees", base);
+}
+
+function dockerContainerName(issue, title) {
+  return `autopocock-${`${slugify(issue)}-${slugify(title)}`.replace(/^-+|-+$/g, "").slice(0, 48) || "dispatch"}`;
+}
+
+function defaultDockerSpec({ issue, title, image = "", workspace = "", network = "" } = {}) {
+  return {
+    image: image || "node:22-bookworm",
+    workspace: workspace || "/workspace",
+    network: network || "bridge",
+    container_name: dockerContainerName(issue, title),
+  };
+}
+
+function dockerSpecForDispatch(artifact, overrides = {}) {
+  return {
+    ...defaultDockerSpec({
+      issue: artifact.issue_id,
+      title: artifact.title,
+      image: overrides.image,
+      workspace: overrides.workspace,
+      network: overrides.network,
+    }),
+    ...(artifact.docker || {}),
+    ...Object.fromEntries(Object.entries(overrides).filter(([, value]) => value)),
+  };
+}
+
+function dockerRunPlanForDispatch(artifact, { provider = "codex" } = {}) {
+  const docker = dockerSpecForDispatch(artifact);
+  const worktreePath = path.resolve(artifact.worktree_path || deriveWorktreePath(artifact.issue_id, artifact.title));
+  const dispatchPath = artifact.dispatch_path ? path.resolve(artifact.dispatch_path) : "";
+  const containerDispatchPath = dispatchPath && dispatchPath.startsWith(cwd)
+    ? path.posix.join(docker.workspace, path.relative(cwd, dispatchPath).replace(/\\/g, "/"))
+    : path.posix.join(docker.workspace, "docs", "agents", "dispatches", `${artifact.dispatch_id}.json`);
+  const args = [
+    "run",
+    "--rm",
+    "-t",
+    "--name",
+    docker.container_name,
+    "--network",
+    docker.network,
+    "-v",
+    `${worktreePath}:${docker.workspace}`,
+    "-w",
+    docker.workspace,
+    docker.image,
+    "pnpm",
+    "ops",
+    "run",
+    "--",
+    "--dispatch",
+    containerDispatchPath,
+    "--execute",
+    "--live-provider",
+    "--provider",
+    provider,
+  ];
+
+  return {
+    image: docker.image,
+    workspace: docker.workspace,
+    network: docker.network,
+    container_name: docker.container_name,
+    worktree_path: worktreePath,
+    command: "docker",
+    args,
+    rendered_command: ["docker", ...args].join(" "),
+  };
 }
 
 function queueRecoveryMessage(queuePath) {
@@ -2323,6 +2395,9 @@ async function createDispatchArtifact({
   conflictSurface = "low",
   isolationMode = "branch",
   handoff = "",
+  dockerImage = "",
+  dockerWorkspace = "",
+  dockerNetwork = "",
 } = {}) {
   if (!issue) {
     throw new Error("Dispatch requires --issue.");
@@ -2352,7 +2427,16 @@ async function createDispatchArtifact({
   const mdTarget = path.join(dir, `${dispatchId}.md`);
   const completionTarget = path.join(cwd, "docs", "agents", "completions", `${dispatchId}-completion.md`);
   const loopSpecTarget = path.join(cwd, "docs", "agents", "loop-specs", `${dispatchId}-loop-spec.json`);
-  const worktreePath = isolationMode === "worktree" ? deriveWorktreePath(issue, title) : "";
+  const worktreePath = ["worktree", "docker"].includes(isolationMode) ? deriveWorktreePath(issue, title) : "";
+  const docker = isolationMode === "docker"
+    ? defaultDockerSpec({
+        issue,
+        title,
+        image: dockerImage,
+        workspace: dockerWorkspace,
+        network: dockerNetwork,
+      })
+    : null;
 
   const artifact = {
     dispatch_id: dispatchId,
@@ -2370,6 +2454,7 @@ async function createDispatchArtifact({
     completion_report_target: completionTarget,
     allowed_commands: ["run relevant tests", "update completion report"],
     forbidden_actions: ["merge PR", "change durable memory without approval", "handle secrets", "make unrelated dependency changes"],
+    ...(docker ? { docker } : {}),
     created_from_scheduler_plan: plan,
     source,
     override_reason: overrideReason,
@@ -2398,6 +2483,9 @@ async function dispatch(args) {
     conflictSurface: readOption(args, "conflict-surface", "low"),
     isolationMode: readOption(args, "isolation-mode", "branch"),
     handoff: readOption(args, "handoff"),
+    dockerImage: readOption(args, "docker-image"),
+    dockerWorkspace: readOption(args, "docker-workspace"),
+    dockerNetwork: readOption(args, "docker-network"),
   });
 
   process.stdout.write(`${created.jsonTarget}\n${created.mdTarget}\n`);
@@ -2407,6 +2495,9 @@ async function claim(args) {
   const claimedBy = readOption(args, "claimed-by");
   const requestedIsolationMode = readOption(args, "isolation-mode", "");
   const requestedWorktreePath = readOption(args, "worktree-path");
+  const requestedDockerImage = readOption(args, "docker-image");
+  const requestedDockerWorkspace = readOption(args, "docker-workspace");
+  const requestedDockerNetwork = readOption(args, "docker-network");
 
   if (!claimedBy) {
     throw new Error("Claim requires --claimed-by.");
@@ -2440,11 +2531,18 @@ async function claim(args) {
       artifact.isolation_mode = isolationMode;
     }
 
-    if (isolationMode === "worktree") {
+    if (["worktree", "docker"].includes(isolationMode)) {
       artifact.worktree_path =
         requestedWorktreePath || artifact.worktree_path || deriveWorktreePath(artifact.issue_id, artifact.title);
+      if (isolationMode === "docker") {
+        artifact.docker = dockerSpecForDispatch(artifact, {
+          image: requestedDockerImage,
+          workspace: requestedDockerWorkspace,
+          network: requestedDockerNetwork,
+        });
+      }
     } else if (requestedWorktreePath) {
-      throw new Error("Claim accepts --worktree-path only when isolation mode is worktree.");
+      throw new Error("Claim accepts --worktree-path only when isolation mode is worktree or docker.");
     }
 
     await writeFile(fullPath, `${JSON.stringify(artifact, null, 2)}\n`, "utf8");
@@ -2639,13 +2737,18 @@ async function worktreeClean(args) {
 
 async function runDispatch(args) {
   const prepareWorktree = args.includes("--prepare-worktree");
+  const prepareDocker = args.includes("--prepare-docker");
   const execute = args.includes("--execute");
   const liveProvider = args.includes("--live-provider");
   const detach = args.includes("--detach");
   const stubResult = readOption(args, "stub-result", "success");
   const selectedProvider = readOption(args, "provider", "codex");
   const providerTimeoutMs = Number.parseInt(readOption(args, "provider-timeout-ms", "45000"), 10);
-  const { artifact } = await resolveDispatchArtifact(args, { command: "run", status: "claimed" });
+  const { fullPath, artifact: resolvedArtifact } = await resolveDispatchArtifact(args, { command: "run", status: "claimed" });
+  const artifact = {
+    ...resolvedArtifact,
+    dispatch_path: fullPath,
+  };
 
   const runValidationErrors = validateClaimedDispatchForRun(artifact);
   if (runValidationErrors.length > 0) {
@@ -2658,6 +2761,18 @@ async function runDispatch(args) {
     }
 
     await mkdir(artifact.worktree_path, { recursive: true });
+  }
+
+  let dockerReadiness = null;
+  const dockerPlan = artifact.isolation_mode === "docker" ? dockerRunPlanForDispatch(artifact, { provider: selectedProvider }) : null;
+
+  if (prepareDocker) {
+    if (artifact.isolation_mode !== "docker") {
+      throw new Error("run -- --prepare-docker requires a docker-isolated dispatch.");
+    }
+
+    await ensureWorktreePath(artifact.worktree_path);
+    dockerReadiness = await commandAvailable("docker");
   }
 
   let executionSummary = "";
@@ -2703,15 +2818,20 @@ async function runDispatch(args) {
     let runtimeState = {
       stop_condition: "",
       escalation_reason: "",
-      isolation_prepared: artifact.isolation_mode !== "worktree",
+      isolation_prepared: !["worktree", "docker"].includes(artifact.isolation_mode),
       log_paths: {
         stdout: stdoutLogPath,
         stderr: stderrLogPath,
       },
+      ...(dockerPlan ? { docker: dockerPlan } : {}),
     };
 
     if (artifact.isolation_mode === "worktree" && artifact.worktree_path) {
       await ensureWorktreePath(artifact.worktree_path);
+      runtimeState.isolation_prepared = true;
+    }
+
+    if (artifact.isolation_mode === "docker" && artifact.worktree_path && (await pathExists(artifact.worktree_path))) {
       runtimeState.isolation_prepared = true;
     }
 
@@ -2746,6 +2866,27 @@ async function runDispatch(args) {
       runtimeState = {
         ...runtimeState,
         ...blocked.runtime,
+      };
+    } else if (artifact.isolation_mode === "docker") {
+      dockerReadiness = dockerReadiness || await commandAvailable("docker");
+      const blocked = buildRuntimeBlockedResult({
+        bundle,
+        verificationCommand: "pnpm ops run -- --dispatch <dispatch> --prepare-docker",
+        summary: "Execution stopped before provider launch because Docker container execution is not wired yet.",
+        gap: "Docker isolation has a prepared container command, but provider execution still needs to be launched inside that container boundary.",
+        stopCondition: "containerized execution boundary not implemented",
+        escalationReason: "Run `pnpm ops run -- --dispatch <dispatch> --prepare-docker`, inspect the Docker command, and wire the container runner before high-concurrency execution.",
+      });
+      result = blocked.result;
+      providerRunStatus = blocked.providerRunStatus;
+      adapterMode = liveProvider ? "live" : "stub";
+      runtimeState = {
+        ...runtimeState,
+        ...blocked.runtime,
+        docker: {
+          ...dockerPlan,
+          available: Boolean(dockerReadiness?.available),
+        },
       };
     } else if ((bundle.execution.stop_conditions || []).length === 0 || (bundle.execution.escalation_rules || []).length === 0) {
       const blocked = buildRuntimeBlockedResult({
@@ -3004,13 +3145,25 @@ async function runDispatch(args) {
     `Expected branch: ${artifact.expected_branch || "TBD"}`,
     `Worktree path: ${artifact.worktree_path || "N/A"}`,
     `Worktree prepared: ${prepareWorktree ? "yes" : "no"}`,
+    ...(dockerPlan
+      ? [
+          `Docker image: ${dockerPlan.image}`,
+          `Docker workspace: ${dockerPlan.workspace}`,
+          `Docker network: ${dockerPlan.network}`,
+          `Docker container: ${dockerPlan.container_name}`,
+          `Docker available: ${dockerReadiness ? (dockerReadiness.available ? "yes" : "no") : "not checked"}`,
+          `Docker command: ${dockerPlan.rendered_command}`,
+        ]
+      : []),
     `Handoff artifact: ${artifact.handoff_artifact || "TBD"}`,
     `Completion report target: ${artifact.completion_report_target || "TBD"}`,
     "",
     "Forbidden actions:",
     ...artifact.forbidden_actions.map((action) => `- ${action}`),
     "",
-    prepareWorktree
+    prepareDocker
+      ? "No provider was invoked. Docker isolation plan was prepared; provider execution inside Docker is not wired yet."
+      : prepareWorktree
       ? "No provider was invoked. Worktree directory was prepared locally. No code was changed."
       : execute
         ? detach
