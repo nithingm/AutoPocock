@@ -135,7 +135,7 @@ Observed:
 The core landing and tracker reconciliation are complete. Remaining work is product hardening beyond the current local prototype:
 
 1. GitHub Project views are now inspected and drift-reported through GraphQL; creation and renaming remain manual because GitHub CLI/GraphQL do not expose ProjectV2 view mutations.
-2. Replace tracker-visible claim leases with true distributed compare-and-swap locking for multiple runners.
+2. Distributed claim locking now has an opt-in GitHub ref CAS path; remaining deployment work is packaging it for always-on multi-runner operations and lock-ref retention.
 3. Validate concrete hardened Docker images and provider credential packages for the deployment environment.
 4. Re-run full local tests plus strict live tracker verification after any follow-up updates.
 

@@ -94,11 +94,12 @@ Usage:
   pnpm ops claim -- --dispatch docs/agents/dispatches/dispatch-id.json --claimed-by runner-name --isolation-mode worktree
   pnpm ops claim -- --dispatch docs/agents/dispatches/dispatch-id.json --claimed-by runner-name --lease-hours 24
   pnpm ops claim -- --dispatch docs/agents/dispatches/dispatch-id.json --claimed-by runner-name --apply-tracker
+  pnpm ops claim -- --dispatch docs/agents/dispatches/dispatch-id.json --claimed-by runner-name --apply-lock-ref
   pnpm ops claim-status -- --dispatch docs/agents/dispatches/dispatch-id.json --max-age-hours 24
   pnpm ops reclaim -- --dispatch docs/agents/dispatches/dispatch-id.json --approved-by solo-operator --reason "Runner abandoned work"
   pnpm ops reclaim -- --dispatch docs/agents/dispatches/dispatch-id.json --approved-by solo-operator --reason "Runner abandoned work" --apply-tracker
   pnpm ops reclaim-expired -- --max-age-hours 24
-  pnpm ops reclaim-expired -- --apply --approved-by solo-operator --reason "Lease expired" --apply-tracker
+  pnpm ops reclaim-expired -- --apply --approved-by solo-operator --reason "Lease expired" --apply-tracker --apply-lock-ref
   pnpm ops qa -- --issue 123 --pr 456
   pnpm ops qa
   pnpm ops board
@@ -620,6 +621,14 @@ async function runGh(args) {
       return await runCommand(candidate, args);
     } catch (error) {
       lastError = error;
+      const detail = `${error.stderr || error.message || ""}`.toLowerCase();
+      const missingCandidate = error.code === "ENOENT"
+        || detail.includes("not recognized")
+        || detail.includes("cannot find the path")
+        || detail.includes("no such file");
+      if (!missingCandidate) {
+        throw error;
+      }
     }
   }
 
@@ -1968,6 +1977,89 @@ async function clearClaimTrackerLease({ config, args, artifact }) {
   process.stdout.write(`Cleared tracker claim lease for ${artifact.dispatch_id} from Runner.\n`);
 }
 
+function claimLockRef(artifact) {
+  const lockName = slugify(artifact?.dispatch_id || `${artifact?.issue_id || "dispatch"}-${artifact?.title || "claim"}`);
+  return `refs/heads/autopocock-locks/${lockName || "dispatch"}`;
+}
+
+function gitHubRepoRef(config, args = [], context = "GitHub operation") {
+  const owner = readOption(args, "owner", config.github?.owner || "");
+  const repo = readOption(args, "repo", config.github?.repo || "");
+  if (!owner || !repo) {
+    throw new Error(`${context} requires configured GitHub owner/repo or --owner/--repo.`);
+  }
+  return { owner, repo };
+}
+
+async function ensureGhReady(context) {
+  const ghVersion = await commandAvailable("gh");
+  if (!ghVersion.available) {
+    throw new Error(`${context} requires gh CLI. Install it from https://cli.github.com/.`);
+  }
+
+  const auth = await commandAvailable("gh", ["auth", "status"]);
+  if (!auth.available) {
+    throw new Error(`${context} requires GitHub authentication. Run \`gh auth login\` first.`);
+  }
+}
+
+async function acquireGitHubClaimLock({ config, args, artifact, runner }) {
+  await ensureGhReady("claim -- --apply-lock-ref");
+  const { owner, repo } = gitHubRepoRef(config, args, "claim -- --apply-lock-ref");
+  const repoPath = `repos/${owner}/${repo}`;
+  const repoResult = await runGh(["api", repoPath]);
+  const defaultBranch = JSON.parse(repoResult.stdout || "{}").default_branch || "main";
+  const defaultRefResult = await runGh(["api", `${repoPath}/git/ref/heads/${defaultBranch}`]);
+  const sha = JSON.parse(defaultRefResult.stdout || "{}").object?.sha;
+  if (!sha) {
+    throw new Error(`claim -- --apply-lock-ref could not resolve ${owner}/${repo}@${defaultBranch}.`);
+  }
+
+  const ref = claimLockRef(artifact);
+  try {
+    await runGh([
+      "api",
+      `${repoPath}/git/refs`,
+      "-f",
+      `ref=${ref}`,
+      "-f",
+      `sha=${sha}`,
+    ]);
+  } catch (error) {
+    throw new Error(
+      [
+        `Could not acquire distributed claim lock ${ref}.`,
+        "Another runner may already hold this dispatch lock.",
+        error.stderr || error.message || String(error),
+      ].filter(Boolean).join("\n"),
+    );
+  }
+
+  return {
+    provider: "github-ref",
+    ref,
+    owner,
+    repo,
+    base_branch: defaultBranch,
+    base_sha: sha,
+    acquired_by: runner,
+    acquired_at: nowIso(),
+  };
+}
+
+async function releaseGitHubClaimLock({ config, args, artifact }) {
+  const lock = artifact?.claim?.distributed_lock;
+  if (lock?.provider !== "github-ref" || !lock.ref) {
+    return null;
+  }
+
+  await ensureGhReady("reclaim -- --apply-lock-ref");
+  const { owner, repo } = gitHubRepoRef(config, args, "reclaim -- --apply-lock-ref");
+  const apiRef = lock.ref.replace(/^refs\//, "");
+  await runGh(["api", "-X", "DELETE", `repos/${owner}/${repo}/git/refs/${apiRef}`]);
+  return lock;
+}
+
 async function gitHubExport(args) {
   const config = await loadJson(".ai/ops.config.json");
   const project = configuredProjectRef(config, args);
@@ -2640,6 +2732,7 @@ async function claim(args) {
   const requestedDockerVolumes = splitOptionList(readOption(args, "docker-volume"));
   const leaseHours = parsePositiveNumber(readOption(args, "lease-hours", ""), 24, "Claim --lease-hours");
   const applyTracker = args.includes("--apply-tracker");
+  const applyLockRef = args.includes("--apply-lock-ref");
   let claimedArtifact = null;
 
   if (!claimedBy) {
@@ -2650,6 +2743,7 @@ async function claim(args) {
 
   await withDispatchArtifactLock(fullPath, async () => {
     const artifact = JSON.parse(await readFile(fullPath, "utf8"));
+    let distributedLock = null;
 
     if (artifact.status !== "queued") {
       throw new Error(`Dispatch ${artifact.dispatch_id || fullPath} is ${artifact.status}, not queued.`);
@@ -2664,6 +2758,15 @@ async function claim(args) {
       );
     }
 
+    if (applyLockRef) {
+      distributedLock = await acquireGitHubClaimLock({
+        config: await loadJson(".ai/ops.config.json"),
+        args,
+        artifact,
+        runner: claimedBy,
+      });
+    }
+
     artifact.status = "claimed";
     artifact.claim = {
       claimed_by: claimedBy,
@@ -2671,6 +2774,7 @@ async function claim(args) {
       lease_hours: leaseHours,
       expires_at: addHoursIso(claimedAt, leaseHours),
       isolation_mode: isolationMode,
+      ...(distributedLock ? { distributed_lock: distributedLock } : {}),
     };
 
     if (!artifact.isolation_mode) {
@@ -2708,6 +2812,9 @@ async function claim(args) {
   }
 
   process.stdout.write(`${fullPath}\n`);
+  if (claimedArtifact?.claim?.distributed_lock) {
+    process.stdout.write(`Acquired distributed claim lock ${claimedArtifact.claim.distributed_lock.ref}.\n`);
+  }
 }
 
 async function claimStatus(args) {
@@ -2742,7 +2849,9 @@ async function reclaim(args) {
   const reason = readOption(args, "reason");
   const maxAgeHours = parsePositiveNumber(readOption(args, "max-age-hours", "24"), 24, "reclaim --max-age-hours");
   const applyTracker = args.includes("--apply-tracker");
+  const applyLockRef = args.includes("--apply-lock-ref");
   let reclaimedArtifact = null;
+  let releasedLock = null;
 
   if (!approvedBy) {
     throw new Error("Reclaim requires --approved-by.");
@@ -2762,6 +2871,14 @@ async function reclaim(args) {
     }
 
     const inspection = inspectClaimAge(artifact, maxAgeHours);
+    if (applyLockRef) {
+      releasedLock = await releaseGitHubClaimLock({
+        config: await loadJson(".ai/ops.config.json"),
+        args,
+        artifact,
+      });
+    }
+
     const historyEntry = {
       ...artifact.claim,
       reclaimed_at: nowIso(),
@@ -2788,11 +2905,15 @@ async function reclaim(args) {
 
   process.stdout.write(`${fullPath}\n`);
   process.stdout.write(`Reclaimed by ${approvedBy}. Dispatch returned to queued.\n`);
+  if (releasedLock) {
+    process.stdout.write(`Released distributed claim lock ${releasedLock.ref}.\n`);
+  }
 }
 
 async function reclaimExpired(args) {
   const apply = args.includes("--apply");
   const applyTracker = args.includes("--apply-tracker");
+  const applyLockRef = args.includes("--apply-lock-ref");
   const approvedBy = readOption(args, "approved-by");
   const reason = readOption(args, "reason", "Claim lease expired");
   const maxAgeHours = parsePositiveNumber(readOption(args, "max-age-hours", "24"), 24, "reclaim-expired --max-age-hours");
@@ -2838,6 +2959,8 @@ async function reclaimExpired(args) {
   }
 
   const reclaimedArtifacts = [];
+  const releasedLocks = [];
+  const lockConfig = applyLockRef ? await loadJson(".ai/ops.config.json") : null;
   for (const candidate of candidates) {
     let reclaimedArtifact = null;
     await withDispatchArtifactLock(candidate.fullPath, async () => {
@@ -2849,6 +2972,17 @@ async function reclaimExpired(args) {
       const inspection = inspectClaimAge(artifact, maxAgeHours);
       if (!inspection.stale) {
         return;
+      }
+
+      if (applyLockRef) {
+        const releasedLock = await releaseGitHubClaimLock({
+          config: lockConfig,
+          args,
+          artifact,
+        });
+        if (releasedLock) {
+          releasedLocks.push(releasedLock);
+        }
       }
 
       const historyEntry = {
@@ -2881,6 +3015,9 @@ async function reclaimExpired(args) {
   }
 
   lines.push("", `Applied expired-claim enforcement for ${reclaimedArtifacts.length} dispatch artifact(s).`);
+  if (releasedLocks.length > 0) {
+    lines.push(`Released distributed claim locks for ${releasedLocks.length} dispatch artifact(s).`);
+  }
   process.stdout.write(`${lines.join("\n")}\n`);
 }
 

@@ -81,6 +81,10 @@ if [ "$1" = "auth" ] && [ "$2" = "status" ]; then exit 0; fi
 if [ "$1" = "project" ] && [ "$2" = "view" ]; then echo '{"id":"PVT_fake_project"}'; exit 0; fi
 if [ "$1" = "project" ] && [ "$2" = "field-list" ]; then echo '{"fields":[{"id":"stage-field","name":"Execution Stage","options":[{"id":"afk-option","name":"AFK In Progress"}],"type":"ProjectV2SingleSelectField"},{"id":"lane-field","name":"Execution Lane","options":[{"id":"execution-option","name":"Execution"}],"type":"ProjectV2SingleSelectField"},{"id":"last-plan-field","name":"Last Scheduler Plan","type":"ProjectV2Field"},{"id":"dispatch-id-field","name":"Dispatch ID","type":"ProjectV2Field"},{"id":"runner-field","name":"Runner","type":"ProjectV2Field"}]}'; exit 0; fi
 if [ "$1" = "project" ] && [ "$2" = "item-edit" ]; then exit 0; fi
+if [ "$1" = "api" ] && [ "$2" = "repos/nithingm/AutoPocock" ]; then echo '{"default_branch":"main"}'; exit 0; fi
+if [ "$1" = "api" ] && [ "$2" = "repos/nithingm/AutoPocock/git/ref/heads/main" ]; then echo '{"object":{"sha":"fake-main-sha"}}'; exit 0; fi
+if [ "$1" = "api" ] && [ "$2" = "repos/nithingm/AutoPocock/git/refs" ]; then if [ "$GH_CREATE_REF_FAIL" = "1" ]; then echo "Reference already exists" >&2; exit 1; fi; echo '{"ref":"refs/heads/autopocock-locks/dispatch-claim-lock"}'; exit 0; fi
+if [ "$1" = "api" ] && [ "$2" = "-X" ] && [ "$3" = "DELETE" ]; then exit 0; fi
 if [ "$1" = "issue" ] && [ "$2" = "create" ]; then echo "https://github.com/example/repo/issues/999"; exit 0; fi
 if [ "$1" = "issue" ] && [ "$2" = "view" ]; then printf '{"comments":[{"id":"IC_existing","body":"%s","url":"https://github.com/example/repo/issues/%s#issuecomment-7"}]}\\n' "$EXISTING_MIRROR_MARKER" "$3"; exit 0; fi
 if [ "$1" = "pr" ] && [ "$2" = "view" ]; then printf '{"comments":[{"id":"IC_existing","body":"%s","url":"https://github.com/example/repo/pull/%s#issuecomment-7"}]}\\n' "$EXISTING_MIRROR_MARKER" "$3"; exit 0; fi
@@ -111,6 +115,23 @@ if "%1"=="project" if "%2"=="field-list" (
   exit /b 0
 )
 if "%1"=="project" if "%2"=="item-edit" exit /b 0
+if "%1"=="api" if "%2"=="repos/nithingm/AutoPocock" (
+  echo {"default_branch":"main"}
+  exit /b 0
+)
+if "%1"=="api" if "%2"=="repos/nithingm/AutoPocock/git/ref/heads/main" (
+  echo {"object":{"sha":"fake-main-sha"}}
+  exit /b 0
+)
+if "%1"=="api" if "%2"=="repos/nithingm/AutoPocock/git/refs" if "%GH_CREATE_REF_FAIL%"=="1" (
+  echo Reference already exists 1>&2
+  exit /b 1
+)
+if "%1"=="api" if "%2"=="repos/nithingm/AutoPocock/git/refs" (
+  echo {"ref":"refs/heads/autopocock-locks/dispatch-claim-lock"}
+  exit /b 0
+)
+if "%1"=="api" if "%2"=="-X" if "%3"=="DELETE" exit /b 0
 if "%1"=="issue" if "%2"=="create" (
   echo https://github.com/example/repo/issues/999
   exit /b 0
@@ -1123,6 +1144,102 @@ test("claim --apply-tracker writes the claimed runner to the GitHub Project item
   assert.match(ghLog, /project item-edit --id PVTI_claim_item --project-id PVT_fake_project --field-id runner-field --text runner-a/);
 });
 
+test("claim --apply-lock-ref acquires an atomic GitHub ref before claiming locally", async () => {
+  const cwd = await makeWorkspace({
+    github: {
+      owner: "nithingm",
+      repo: "AutoPocock",
+      projectNumber: "1",
+    },
+  });
+  const fakeGh = await installFakeGh(cwd);
+  const dispatchPath = path.join(cwd, "docs", "agents", "dispatches", "dispatch-claim-lock.json");
+  await writeFile(
+    dispatchPath,
+    `${JSON.stringify(
+      {
+        dispatch_id: "dispatch-claim-lock",
+        issue_id: "#48",
+        title: "Claim lock proof",
+        status: "queued",
+        forbidden_actions: ["merge PR"],
+        expected_branch: "agent/48-claim-lock-proof",
+        isolation_mode: "worktree",
+        worktree_path: path.join(cwd, ".worktrees", "48-claim-lock-proof"),
+        handoff_artifact: "docs/agents/handoffs/48.md",
+        completion_report_target: "docs/agents/completions/dispatch-claim-lock.md",
+        claim: null,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const result = await runOps(cwd, ["claim", "--dispatch", dispatchPath, "--claimed-by", "runner-a", "--apply-lock-ref"], {
+    env: {
+      ...fakeGh.env,
+      GH_CREATE_REF_FAIL: "",
+    },
+  });
+  const artifact = JSON.parse(await readFile(dispatchPath, "utf8"));
+  const ghLog = await readFile(fakeGh.logPath, "utf8");
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(artifact.status, "claimed");
+  assert.equal(artifact.claim.claimed_by, "runner-a");
+  assert.equal(artifact.claim.distributed_lock.provider, "github-ref");
+  assert.equal(artifact.claim.distributed_lock.ref, "refs/heads/autopocock-locks/dispatch-claim-lock");
+  assert.match(result.stdout, /Acquired distributed claim lock refs\/heads\/autopocock-locks\/dispatch-claim-lock/);
+  assert.match(ghLog, /api repos\/nithingm\/AutoPocock/);
+  assert.match(ghLog, /api repos\/nithingm\/AutoPocock\/git\/ref\/heads\/main/);
+  assert.match(ghLog, /api repos\/nithingm\/AutoPocock\/git\/refs -f ref=refs\/heads\/autopocock-locks\/dispatch-claim-lock -f sha=fake-main-sha/);
+});
+
+test("claim --apply-lock-ref leaves the dispatch queued when the GitHub ref already exists", async () => {
+  const cwd = await makeWorkspace({
+    github: {
+      owner: "nithingm",
+      repo: "AutoPocock",
+      projectNumber: "1",
+    },
+  });
+  const fakeGh = await installFakeGh(cwd);
+  const dispatchPath = path.join(cwd, "docs", "agents", "dispatches", "dispatch-claim-lock-contended.json");
+  await writeFile(
+    dispatchPath,
+    `${JSON.stringify(
+      {
+        dispatch_id: "dispatch-claim-lock-contended",
+        issue_id: "#48",
+        title: "Claim lock proof",
+        status: "queued",
+        forbidden_actions: ["merge PR"],
+        expected_branch: "agent/48-claim-lock-proof",
+        isolation_mode: "worktree",
+        worktree_path: path.join(cwd, ".worktrees", "48-claim-lock-proof"),
+        handoff_artifact: "docs/agents/handoffs/48.md",
+        completion_report_target: "docs/agents/completions/dispatch-claim-lock.md",
+        claim: null,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const result = await runOps(cwd, ["claim", "--dispatch", dispatchPath, "--claimed-by", "runner-a", "--apply-lock-ref"], {
+    env: {
+      ...fakeGh.env,
+      GH_CREATE_REF_FAIL: "1",
+    },
+  });
+  const artifact = JSON.parse(await readFile(dispatchPath, "utf8"));
+
+  assert.notEqual(result.code, 0);
+  assert.equal(artifact.status, "queued");
+  assert.equal(artifact.claim, null);
+  assert.match(result.stderr, /Could not acquire distributed claim lock/);
+});
+
 test("reclaim --apply-tracker clears the claimed runner from the GitHub Project item", async () => {
   const cwd = await makeWorkspace({
     github: {
@@ -1182,6 +1299,70 @@ test("reclaim --apply-tracker clears the claimed runner from the GitHub Project 
   assert.match(ghLog, /project view 1 --owner nithingm --format json/);
   assert.match(ghLog, /project field-list 1 --owner nithingm --format json --limit 100/);
   assert.match(ghLog, /project item-edit --id PVTI_reclaim_item --project-id PVT_fake_project --field-id runner-field --clear/);
+});
+
+test("reclaim --apply-lock-ref releases the GitHub claim ref", async () => {
+  const cwd = await makeWorkspace({
+    github: {
+      owner: "nithingm",
+      repo: "AutoPocock",
+      projectNumber: "1",
+    },
+  });
+  const fakeGh = await installFakeGh(cwd);
+  const dispatchPath = path.join(cwd, "docs", "agents", "dispatches", "dispatch-reclaim-lock.json");
+  await writeFile(
+    dispatchPath,
+    `${JSON.stringify(
+      {
+        dispatch_id: "dispatch-reclaim-lock",
+        issue_id: "#49",
+        title: "Reclaim lock proof",
+        status: "claimed",
+        forbidden_actions: ["merge PR"],
+        expected_branch: "agent/49-reclaim-lock-proof",
+        isolation_mode: "worktree",
+        worktree_path: path.join(cwd, ".worktrees", "49-reclaim-lock-proof"),
+        handoff_artifact: "docs/agents/handoffs/49.md",
+        completion_report_target: "docs/agents/completions/dispatch-reclaim-lock.md",
+        claim: {
+          claimed_by: "runner-a",
+          claimed_at: "2026-06-25T00:00:00.000Z",
+          isolation_mode: "worktree",
+          distributed_lock: {
+            provider: "github-ref",
+            ref: "refs/heads/autopocock-locks/dispatch-reclaim-lock",
+            owner: "nithingm",
+            repo: "AutoPocock",
+          },
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+
+  const result = await runOps(cwd, [
+    "reclaim",
+    "--dispatch",
+    dispatchPath,
+    "--approved-by",
+    "solo-operator",
+    "--reason",
+    "Runner abandoned work",
+    "--apply-lock-ref",
+  ], {
+    env: fakeGh.env,
+  });
+  const artifact = JSON.parse(await readFile(dispatchPath, "utf8"));
+  const ghLog = await readFile(fakeGh.logPath, "utf8");
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(artifact.status, "queued");
+  assert.equal(artifact.claim, null);
+  assert.equal(artifact.claim_history[0].distributed_lock.ref, "refs/heads/autopocock-locks/dispatch-reclaim-lock");
+  assert.match(result.stdout, /Released distributed claim lock refs\/heads\/autopocock-locks\/dispatch-reclaim-lock/);
+  assert.match(ghLog, /api -X DELETE repos\/nithingm\/AutoPocock\/git\/refs\/heads\/autopocock-locks\/dispatch-reclaim-lock/);
 });
 
 test("reclaim-expired --apply-tracker clears expired runner leases from the GitHub Project", async () => {

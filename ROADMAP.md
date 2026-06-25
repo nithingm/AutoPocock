@@ -67,7 +67,7 @@ Execution lanes:
 - Conflict Surface is manually declared first, with opt-in CLI inference from queue write surfaces and active PR files.
 - Initial dispatch creates Dispatch Artifacts instead of calling subagents.
 - Dispatch Artifacts are JSON canonical plus markdown mirror.
-- Dispatch Claims use local filesystem locks around claim/reclaim mutations. Claims record explicit lease expiry metadata, `claim --apply-tracker` publishes the runner lease to the GitHub Project `Runner` field for external visibility, `reclaim --apply-tracker` clears that visible lease during approved recovery, and `reclaim-expired` enforces expired leases with dry-run-first local mutation plus optional tracker clearing. True distributed arbitration remains a future hardening layer.
+- Dispatch Claims use local filesystem locks around claim/reclaim mutations. Claims record explicit lease expiry metadata, `claim --apply-tracker` publishes the runner lease to the GitHub Project `Runner` field for external visibility, and `claim --apply-lock-ref` can acquire an atomic GitHub branch ref under `refs/heads/autopocock-locks/` before local mutation. `reclaim --apply-lock-ref` and `reclaim-expired --apply-lock-ref` release those distributed lock refs during approved recovery.
 
 ## Agent Execution Direction
 
@@ -118,7 +118,7 @@ Execution lanes:
 - How much of GitHub Project view setup should be automated beyond the current report-first contract; Project creation and field creation now have explicit apply paths.
 - Additional provider adapters beyond Codex and Claude Code, if the product boundary expands to more CLIs or hosted runners.
 - Docker runtime policy is accepted in `docs/adr/2026-06-25-docker-runtime-policy.md`; future work should validate concrete hardened images and provider credential packages, not change the default safety boundary.
-- How to extend tracker-visible claim leases into true distributed compare-and-swap locking for multiple runners.
+- How to package the distributed GitHub ref lock path for always-on multi-runner deployments, including retention policy and operational dashboards for abandoned lock refs.
 - External/user-level memory sync is intentionally outside the current product boundary; approved Durable Memory decisions stay repo-local unless a future explicit connector boundary is designed and approved.
 
 ## Locked GitHub Bootstrap Decisions

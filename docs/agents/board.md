@@ -127,11 +127,12 @@ The claim implementation is file-backed and locally locked:
 - It records `claimed_by`, `claimed_at`, `lease_hours`, `expires_at`, and `isolation_mode`.
 - It refuses to claim dispatches that are not `queued`.
 - `pnpm ops claim -- --apply-tracker` writes the claimed runner into the GitHub Project `Runner` field when the dispatch artifact has `project_item_id`.
+- `pnpm ops claim -- --apply-lock-ref` creates an atomic GitHub branch ref under `refs/heads/autopocock-locks/` before local mutation; duplicate ref creation fails the claim and leaves the dispatch queued.
 - `pnpm ops claim-status` reports claim age, lease expiry, and whether the claim appears stale.
 - `pnpm ops reclaim` returns a claimed dispatch to `queued` only with explicit Solo Operator approval and a recorded reason.
 - `pnpm ops reclaim -- --apply-tracker` clears the GitHub Project `Runner` field when the dispatch artifact has `project_item_id`.
-- `pnpm ops reclaim-expired` dry-runs expired lease enforcement across claimed dispatches; `--apply` reclaims expired dispatches with recorded approval, and `--apply-tracker` clears visible Project runner leases.
-- True distributed compare-and-swap locking beyond the tracker-visible runner lease belongs in the future runner layer.
+- `pnpm ops reclaim -- --apply-lock-ref` deletes the recorded GitHub lock ref during approved recovery.
+- `pnpm ops reclaim-expired` dry-runs expired lease enforcement across claimed dispatches; `--apply` reclaims expired dispatches with recorded approval, `--apply-tracker` clears visible Project runner leases, and `--apply-lock-ref` deletes recorded GitHub lock refs.
 
 ## Runner Stub
 
