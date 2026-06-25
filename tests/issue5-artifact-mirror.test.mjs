@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { buildMirrorComment, renderMirrorPlan, summarizeArtifact } from "../scripts/lib/artifact-mirror.mjs";
+import {
+  buildMirrorComment,
+  findMirroredComment,
+  mirrorCommentMarker,
+  renderMirrorPlan,
+  summarizeArtifact,
+} from "../scripts/lib/artifact-mirror.mjs";
 
 test("summarizeArtifact produces a bounded handoff summary", () => {
   const markdown = `# Context Handoff
@@ -109,9 +115,29 @@ Capture the review gate policy as durable memory.
   });
 
   assert.equal(comment.kind, "memory-proposal");
+  assert.match(comment.marker, /^<!-- autopocock:artifact-mirror:memory-proposal:/);
   assert.match(comment.body, /Artifact mirror from `proposal.md`/);
+  assert.match(comment.body, /^<!-- autopocock:artifact-mirror:memory-proposal:/);
   assert.match(comment.body, /Durable memory proposal summary/);
   assert.match(comment.body, /Target files:/);
+});
+
+test("mirror markers are stable and find existing mirror comments", () => {
+  const marker = mirrorCommentMarker({
+    artifactPath: "docs/agents/completions/issue-5.md",
+    kind: "completion",
+  });
+  const comments = [
+    { id: "first", body: "unrelated comment" },
+    { id: "second", body: `old mirror\n${marker}\nbody` },
+  ];
+
+  assert.equal(
+    marker,
+    mirrorCommentMarker({ artifactPath: "docs/agents/completions/issue-5.md", kind: "completion" }),
+  );
+  assert.equal(findMirroredComment(comments, marker).id, "second");
+  assert.equal(findMirroredComment(comments, "<!-- missing -->"), null);
 });
 
 test("renderMirrorPlan prints dry-run target and no-post behavior", () => {
@@ -129,5 +155,6 @@ test("renderMirrorPlan prints dry-run target and no-post behavior", () => {
 
   assert.match(plan, /Mode: dry-run/);
   assert.match(plan, /Target: issue #123/);
+  assert.match(plan, /Existing comment behavior: post a new comment/);
   assert.match(plan, /No GitHub comment was posted/);
 });

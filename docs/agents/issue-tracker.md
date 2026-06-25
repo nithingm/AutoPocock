@@ -29,6 +29,7 @@ GitHub is the default **Operational Tracker**.
 - Supported mirrored artifact families are handoff, HITL, completion, review prep, QA summary, feedback summary, and durable memory proposal summary.
 - Full Scheduler Plans are excluded by default.
 - `pnpm ops mirror` is dry-run by default and only posts with explicit `--apply`.
+- Mirrored comments carry a stable marker so `pnpm ops mirror -- --apply --update-existing` can refresh an existing artifact mirror instead of creating a duplicate comment.
 
 ## Local Fallback
 

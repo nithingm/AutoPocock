@@ -45,7 +45,7 @@ The Umbrella CLI stages the workflow:
 - `pnpm ops qa-decision -- --dag issues/file.json --issue 123 --node node-1 --decision pass --approved-by solo-operator`: apply an explicit QA pass or fail to a DAG node, write a QA decision artifact, and create a follow-up bug draft automatically on QA failure
 - `pnpm ops memory-propose -- --type workflow --title "Update workflow contract" --rationale "Why this belongs in durable memory" --target-files "docs/agents/workflow.md|CONTEXT.md" --suggested-text "Proposed durable memory text" --accept-risk "Risk if accepted" --reject-risk "Risk if rejected"`: create durable memory proposal artifacts without editing durable memory directly
 - `pnpm ops memory-decision -- --proposal docs/agents/memory-proposals/file.json --decision approve --approved-by solo-operator --reason "Accepted"`: record approval or rejection for a durable memory proposal; add `--apply` with approval to append the proposal text to repo target files using an idempotent marker
-- `pnpm ops mirror -- --artifact docs/agents/handoffs/file.md --issue 123`: dry-run a selective GitHub comment mirror for supported workflow artifacts
+- `pnpm ops mirror -- --artifact docs/agents/handoffs/file.md --issue 123`: dry-run a selective GitHub comment mirror for supported workflow artifacts; add `--apply --update-existing` to refresh an existing marked mirror comment instead of posting a duplicate
 - `pnpm ops feedback -- --issue 123 --finding "QA finding text"`: classify a QA finding into a Same-PR Fix candidate or a new bug draft, and write a local feedback artifact without mutating GitHub; add `--pr 456` only when a PR already exists, and add `--apply` only when you intentionally want the GitHub mutation
 - `pnpm ops dispatch -- --issue 123 --title "Implement slice" --source manual --override-reason "Solo Operator approved"`: create dispatch-ready artifacts without calling a subagent
 - `pnpm ops claim -- --dispatch docs/agents/dispatches/dispatch-id.json --claimed-by runner-name --isolation-mode worktree`: claim a queued dispatch artifact with an exclusive local artifact lock
@@ -167,6 +167,9 @@ Review and QA progression are now durable workflow transitions, not implicit hum
 
 - Supported artifacts include handoff, Prepared Human Step, Completion Report, Review Prep, QA summaries, feedback summaries, and durable memory proposal summaries.
 - The command prints the target issue or PR and the summarized comment body before any posting behavior.
+- Mirror comments include a stable `autopocock:artifact-mirror` marker derived from the artifact path and kind.
+- `--apply` posts a new GitHub issue or PR comment.
+- `--apply --update-existing` first searches existing target comments for the marker and edits the matching comment when present; if no match exists, it posts a new comment.
 - Full Scheduler Plans are blocked by default because they are too noisy for issue comments.
 - GitHub posting requires explicit `--apply`.
 

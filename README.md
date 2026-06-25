@@ -118,5 +118,6 @@ What counts as done for a slice in the manual OS:
 6. Export or prepare queue input, then run `pnpm ops schedule -- --apply` to reserve eligible AFK work on the Project, `pnpm ops schedule -- --dispatch` to create dispatch artifacts, or both flags together when you want the generated `Dispatch ID` reflected in GitHub.
 7. Run `pnpm ops qa`.
 8. Run `pnpm ops feedback` to classify QA findings before deciding on Same-PR fixes or bug follow-ups. Add `--apply` only when you intentionally want the PR comment or follow-up issue created in GitHub.
-9. Use `pnpm ops memory-propose` and `pnpm ops memory-decision` when a workflow decision should become repo-local durable memory.
-10. Capture defects as new issues instead of widening the current change.
+9. Use `pnpm ops mirror -- --apply --update-existing` when you want to refresh an existing marked GitHub artifact mirror instead of posting another copy.
+10. Use `pnpm ops memory-propose` and `pnpm ops memory-decision` when a workflow decision should become repo-local durable memory.
+11. Capture defects as new issues instead of widening the current change.

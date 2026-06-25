@@ -99,7 +99,7 @@ Execution lanes:
 - `pnpm ops github:init`: report required GitHub Project fields/views; do not create Projects in the first version.
 - `pnpm ops github:init -- --create-project`: future explicit project creation mode after label/export work is stable.
 - `pnpm ops github:export`: export GitHub issue/project metadata into `.ai/queue.json`.
-- `pnpm ops mirror`: summarize supported local workflow artifacts into dry-run GitHub comment bodies; `--apply` posts with an explicit GitHub mutation.
+- `pnpm ops mirror`: summarize supported local workflow artifacts into dry-run GitHub comment bodies; `--apply` posts with an explicit GitHub mutation, and `--update-existing` refreshes a matching marked comment when present.
 - `pnpm ops memory-propose`: create durable memory proposal artifacts without editing durable memory directly.
 - `pnpm ops memory-decision`: record Durable Memory proposal approval/rejection and optionally apply approved repo-local target-file updates.
 - `pnpm ops schedule -- --apply`: update GitHub Project fields for `DISPATCH` decisions without creating dispatch artifacts.
@@ -118,7 +118,7 @@ Execution lanes:
 - Worktree directory layout and cleanup policy.
 - Docker image contract and mounted workspace layout.
 - How to infer advisory Conflict Surface from file paths and active PRs.
-- Whether local body-file mirroring should gain richer duplicate/comment-update behavior.
+- Whether provider-run mirroring should share the same marked-comment update path as artifact mirroring.
 - How to extend Dispatch Claim locking beyond local filesystem coordination for distributed runners.
 - How approved repo-local Durable Memory decisions should sync into external/user-level memory stores, if that becomes part of the product boundary.
 

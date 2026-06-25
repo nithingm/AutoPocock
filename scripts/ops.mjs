@@ -12,7 +12,7 @@ import {
   markMemoryProposalApplied,
   writeMemoryProposalArtifact,
 } from "./lib/memory-proposals.mjs";
-import { buildMirrorComment, renderMirrorPlan } from "./lib/artifact-mirror.mjs";
+import { buildMirrorComment, findMirroredComment, renderMirrorPlan } from "./lib/artifact-mirror.mjs";
 import { classifyFeedback, createFeedbackArtifactSuggestion, renderFeedbackClassification } from "./lib/feedback-classifier.mjs";
 import {
   approveContextArtifact,
@@ -504,6 +504,24 @@ async function withTemporaryGhBody(body, callback) {
   } finally {
     await unlink(tempPath).catch(() => {});
   }
+}
+
+async function listGitHubComments({ issue, pr }) {
+  const result = issue
+    ? await runGh(["issue", "view", issue, "--json", "comments"])
+    : await runGh(["pr", "view", pr, "--json", "comments"]);
+  const parsed = JSON.parse(result.stdout || "{}");
+  return Array.isArray(parsed.comments) ? parsed.comments : [];
+}
+
+async function updateGitHubIssueComment(commentId, body) {
+  if (!commentId) {
+    throw new Error("Cannot update mirrored GitHub comment without a comment id.");
+  }
+
+  const mutation = "mutation($id: ID!, $body: String!) { updateIssueComment(input: {id: $id, body: $body}) { issueComment { id url } } }";
+  return withTemporaryGhBody(body, (bodyPath) =>
+    runGh(["api", "graphql", "-f", `query=${mutation}`, "-F", `id=${commentId}`, "-F", `body=@${bodyPath}`]));
 }
 
 async function killProcessTree(pid) {
@@ -1150,10 +1168,11 @@ async function mirrorArtifact(args) {
   const issue = readOption(args, "issue");
   const pr = readOption(args, "pr");
   const apply = args.includes("--apply");
+  const updateExisting = args.includes("--update-existing");
   const artifactPath = path.isAbsolute(artifact) ? artifact : path.join(cwd, artifact);
   const markdown = await readFile(artifactPath, "utf8");
   const comment = buildMirrorComment({ artifactPath: artifact, markdown, issue, pr });
-  const plan = renderMirrorPlan({ artifactPath: artifact, issue, pr, comment, apply });
+  const plan = renderMirrorPlan({ artifactPath: artifact, issue, pr, comment, apply, updateExisting });
 
   process.stdout.write(plan);
 
@@ -1171,12 +1190,23 @@ async function mirrorArtifact(args) {
     throw new Error("GitHub authentication is required for mirror -- --apply. Run `gh auth login` first.");
   }
 
+  if (updateExisting) {
+    const existing = findMirroredComment(await listGitHubComments({ issue, pr }), comment.marker);
+    if (existing) {
+      await updateGitHubIssueComment(existing.id, comment.body);
+      process.stdout.write(`GitHub mirror comment updated: ${existing.url || existing.id}.\n`);
+      return;
+    }
+  }
+
   if (issue) {
     await withTemporaryGhBody(comment.body, (bodyPath) =>
       runGh(["issue", "comment", issue, "--body-file", bodyPath]));
+    process.stdout.write(`GitHub mirror comment posted to issue #${issue}.\n`);
   } else {
     await withTemporaryGhBody(comment.body, (bodyPath) =>
       runGh(["pr", "comment", pr, "--body-file", bodyPath]));
+    process.stdout.write(`GitHub mirror comment posted to PR #${pr}.\n`);
   }
 }
 

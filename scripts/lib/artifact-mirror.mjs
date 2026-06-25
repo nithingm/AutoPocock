@@ -1,4 +1,5 @@
 import path from "node:path";
+import { createHash } from "node:crypto";
 
 function normalizeText(value) {
   return String(value || "").replace(/\r\n/g, "\n").trim();
@@ -239,6 +240,16 @@ export function summarizeArtifact(artifactPath, markdown) {
   };
 }
 
+export function mirrorCommentMarker({ artifactPath, kind }) {
+  const normalizedPath = String(artifactPath || "").replace(/\\/g, "/");
+  const digest = createHash("sha256").update(normalizedPath).digest("hex").slice(0, 16);
+  return `<!-- autopocock:artifact-mirror:${kind}:${digest} -->`;
+}
+
+export function findMirroredComment(comments, marker) {
+  return (comments || []).find((comment) => String(comment?.body || "").includes(marker)) || null;
+}
+
 export function buildMirrorComment({ artifactPath, markdown, issue, pr }) {
   if (!artifactPath) {
     throw new Error("Mirror requires --artifact.");
@@ -254,7 +265,9 @@ export function buildMirrorComment({ artifactPath, markdown, issue, pr }) {
 
   const summary = summarizeArtifact(artifactPath, markdown);
   const target = issue ? { type: "issue", id: issue } : { type: "pr", id: pr };
+  const marker = mirrorCommentMarker({ artifactPath, kind: summary.kind });
   const body = [
+    marker,
     `Artifact mirror from \`${path.basename(artifactPath)}\``,
     "",
     ...summary.lines.map((line) => `- ${line}`),
@@ -263,11 +276,12 @@ export function buildMirrorComment({ artifactPath, markdown, issue, pr }) {
   return {
     target,
     kind: summary.kind,
+    marker,
     body,
   };
 }
 
-export function renderMirrorPlan({ artifactPath, issue, pr, comment, apply = false }) {
+export function renderMirrorPlan({ artifactPath, issue, pr, comment, apply = false, updateExisting = false }) {
   const targetLabel = issue ? `issue #${issue}` : `PR #${pr}`;
   return `# Artifact Mirror
 
@@ -275,6 +289,8 @@ Mode: ${apply ? "apply" : "dry-run"}
 Artifact: ${artifactPath}
 Target: ${targetLabel}
 Type: ${comment.kind}
+Mirror marker: ${comment.marker || "none"}
+Existing comment behavior: ${updateExisting ? "update matching mirror comment when present" : "post a new comment"}
 
 ## Comment Body
 

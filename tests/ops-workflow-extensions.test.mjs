@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
+import { mirrorCommentMarker } from "../scripts/lib/artifact-mirror.mjs";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = path.resolve(import.meta.dirname, "..");
@@ -81,8 +82,11 @@ if [ "$1" = "project" ] && [ "$2" = "view" ]; then echo '{"id":"PVT_fake_project
 if [ "$1" = "project" ] && [ "$2" = "field-list" ]; then echo '{"fields":[{"id":"stage-field","name":"Execution Stage","options":[{"id":"afk-option","name":"AFK In Progress"}],"type":"ProjectV2SingleSelectField"},{"id":"lane-field","name":"Execution Lane","options":[{"id":"execution-option","name":"Execution"}],"type":"ProjectV2SingleSelectField"},{"id":"last-plan-field","name":"Last Scheduler Plan","type":"ProjectV2Field"},{"id":"dispatch-id-field","name":"Dispatch ID","type":"ProjectV2Field"}]}'; exit 0; fi
 if [ "$1" = "project" ] && [ "$2" = "item-edit" ]; then exit 0; fi
 if [ "$1" = "issue" ] && [ "$2" = "create" ]; then echo "https://github.com/example/repo/issues/999"; exit 0; fi
+if [ "$1" = "issue" ] && [ "$2" = "view" ]; then printf '{"comments":[{"id":"IC_existing","body":"%s","url":"https://github.com/example/repo/issues/%s#issuecomment-7"}]}\\n' "$EXISTING_MIRROR_MARKER" "$3"; exit 0; fi
+if [ "$1" = "pr" ] && [ "$2" = "view" ]; then printf '{"comments":[{"id":"IC_existing","body":"%s","url":"https://github.com/example/repo/pull/%s#issuecomment-7"}]}\\n' "$EXISTING_MIRROR_MARKER" "$3"; exit 0; fi
 if [ "$1" = "pr" ] && [ "$2" = "comment" ]; then echo "https://github.com/example/repo/pull/$3#issuecomment-1"; exit 0; fi
 if [ "$1" = "issue" ] && [ "$2" = "comment" ]; then echo "https://github.com/example/repo/issues/$3#issuecomment-1"; exit 0; fi
+if [ "$1" = "api" ] && [ "$2" = "graphql" ]; then echo '{"data":{"updateIssueComment":{"issueComment":{"id":"IC_existing","url":"https://github.com/example/repo/issues/5#issuecomment-7"}}}}'; exit 0; fi
 exit 0
 `,
     "utf8",
@@ -111,12 +115,24 @@ if "%1"=="issue" if "%2"=="create" (
   echo https://github.com/example/repo/issues/999
   exit /b 0
 )
+if "%1"=="issue" if "%2"=="view" (
+  echo {"comments":[{"id":"IC_existing","body":"%EXISTING_MIRROR_MARKER%","url":"https://github.com/example/repo/issues/%3#issuecomment-7"}]}
+  exit /b 0
+)
+if "%1"=="pr" if "%2"=="view" (
+  echo {"comments":[{"id":"IC_existing","body":"%EXISTING_MIRROR_MARKER%","url":"https://github.com/example/repo/pull/%3#issuecomment-7"}]}
+  exit /b 0
+)
 if "%1"=="pr" if "%2"=="comment" (
   echo https://github.com/example/repo/pull/%3#issuecomment-1
   exit /b 0
 )
 if "%1"=="issue" if "%2"=="comment" (
   echo https://github.com/example/repo/issues/%3#issuecomment-1
+  exit /b 0
+)
+if "%1"=="api" if "%2"=="graphql" (
+  echo {"data":{"updateIssueComment":{"issueComment":{"id":"IC_existing","url":"https://github.com/example/repo/issues/5#issuecomment-7"}}}}
   exit /b 0
 )
 exit /b 0
@@ -760,6 +776,44 @@ test("mirror --apply posts via a body file so multiline artifacts are safe", asy
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stdout, /Mode: apply/);
   assert.match(ghLog, /issue comment 5 --body-file/);
+});
+
+test("mirror --apply --update-existing edits a matching mirror comment", async () => {
+  const cwd = await makeWorkspace();
+  const fakeGh = await installFakeGh(cwd);
+  const artifactDir = path.join(cwd, "docs", "agents", "completions");
+  const artifactPath = path.join(artifactDir, "issue-5.md");
+  await writeFile(
+    artifactPath,
+    `# Completion Report
+
+## Result
+
+- Status: needs human review
+- Summary: Added selective mirroring
+
+## Verification
+
+- Commands run: node --test
+- Results: Passing
+`,
+  );
+  const marker = mirrorCommentMarker({ artifactPath, kind: "completion" });
+
+  const result = await runOps(cwd, ["mirror", "--artifact", artifactPath, "--issue", "5", "--apply", "--update-existing"], {
+    env: {
+      ...fakeGh.env,
+      EXISTING_MIRROR_MARKER: marker,
+    },
+  });
+  const ghLog = await readFile(fakeGh.logPath, "utf8");
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /Existing comment behavior: update matching mirror comment when present/);
+  assert.match(result.stdout, /GitHub mirror comment updated/);
+  assert.match(ghLog, /issue view 5 --json comments/);
+  assert.match(ghLog, /api graphql/);
+  assert.doesNotMatch(ghLog, /issue comment 5 --body-file/);
 });
 
 test("feedback prints a dry-run classification without mutating GitHub", async () => {
