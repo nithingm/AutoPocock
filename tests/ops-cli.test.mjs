@@ -241,6 +241,42 @@ test("github:export missing gh guidance includes immediate and permanent recover
   assert.match(result.stderr, /Permanent fix: install gh from https:\/\/cli\.github\.com\/ and run `gh auth login`/);
 });
 
+test("github:init --write-view-plan writes prepared Project view artifacts", async () => {
+  const cwd = await makeWorkspace({
+    github: {
+      owner: "example",
+      repo: "repo",
+      projectNumber: "7",
+    },
+    root: {
+      projectSchema: {
+        requiredFields: [],
+        recommendedViews: ["Intake", "Validation"],
+      },
+    },
+  });
+
+  const result = await runOps(cwd, ["github:init", "--write-view-plan"], {
+    env: {
+      PATH: "",
+    },
+  });
+  const hitlDir = path.join(cwd, "docs", "agents", "hitl");
+  const artifacts = await readdir(hitlDir);
+  const markdownName = artifacts.find((entry) => entry.endsWith("-github-project-views.md"));
+  const jsonName = artifacts.find((entry) => entry.endsWith("-github-project-views.json"));
+  const markdown = await readFile(path.join(hitlDir, markdownName), "utf8");
+  const json = JSON.parse(await readFile(path.join(hitlDir, jsonName), "utf8"));
+
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Project View Plan Artifact/);
+  assert.equal(json.schema_version, "github-project-view-plan/v1");
+  assert.equal(json.summary.recommended_views, 2);
+  assert.match(markdown, /Prepared Human Step: GitHub Project Views/);
+  assert.match(markdown, /View mutations available: no/);
+  assert.match(markdown, /Command: `pnpm ops github:init`/);
+});
+
 test("github:export writes a non-Done queue snapshot from an input fixture", async () => {
   const cwd = await makeWorkspace();
   const inputPath = path.join(cwd, "project-items.json");

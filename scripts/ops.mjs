@@ -4,7 +4,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { buildReviewPrep, parseCompletionReport } from "./lib/review-gate.mjs";
-import { createGitHubBootstrapReport } from "./lib/github-init.mjs";
+import {
+  buildProjectViewPlan,
+  createGitHubBootstrapReport,
+  renderProjectViewPlanMarkdown,
+} from "./lib/github-init.mjs";
 import {
   applyMemoryProposalToText,
   createMemoryProposal,
@@ -113,6 +117,7 @@ Usage:
   pnpm ops schedule -- --queue .ai/queue.json --dispatch
   pnpm ops schedule -- --queue .ai/queue.json --dispatch --require-lock-ref
   pnpm ops github:init
+  pnpm ops github:init -- --write-view-plan
   pnpm ops github:init -- --apply --create-project --project-title "AutoPocock"
   pnpm ops github:init -- --apply --create-project-fields
   pnpm ops github:export
@@ -1628,6 +1633,7 @@ async function gitHubInit(args = []) {
   const apply = args.includes("--apply");
   const createProject = args.includes("--create-project");
   const createProjectFields = args.includes("--create-project-fields");
+  const writeViewPlan = args.includes("--write-view-plan");
   const projectTitle = readOption(args, "project-title", config.github?.repo || "AutoPocock");
   const ghVersion = await commandAvailable("gh");
   const auth = ghVersion.available ? await commandAvailable("gh", ["auth", "status"]) : null;
@@ -1766,7 +1772,28 @@ async function gitHubInit(args = []) {
   process.stdout.write("- Use `pnpm ops github:init -- --apply` for missing label creation.\n");
   process.stdout.write("- Use `pnpm ops github:init -- --apply --create-project --project-title \"Name\"` only for fresh setups without a configured Project reference.\n");
   process.stdout.write("- Use `pnpm ops github:init -- --apply --create-project-fields` to create missing configured Project fields.\n");
+  process.stdout.write("- Use `pnpm ops github:init -- --write-view-plan` to write an exact Prepared Human Step for Project view create/rename workarounds.\n");
   process.stdout.write("- Create, rename, or adjust GitHub Project views manually when Project View Inspection reports missing views or drift; GitHub CLI/GraphQL do not expose ProjectV2 view mutations.\n");
+
+  if (writeViewPlan) {
+    const generatedAt = nowIso();
+    const plan = buildProjectViewPlan({
+      repository: project,
+      projectViews: config.projectSchema?.recommendedViews || [],
+      projectViewInspection: report.projectViewInspection,
+      generatedAt,
+    });
+    const fileSlug = `${nowForFile()}-github-project-views`;
+    const dir = path.join(cwd, "docs", "agents", "hitl");
+    const jsonPath = path.join(dir, `${fileSlug}.json`);
+    const markdownPath = path.join(dir, `${fileSlug}.md`);
+    await mkdir(dir, { recursive: true });
+    await writeFile(jsonPath, `${JSON.stringify(plan, null, 2)}\n`, "utf8");
+    await writeFile(markdownPath, renderProjectViewPlanMarkdown(plan), "utf8");
+    process.stdout.write("\n## Project View Plan Artifact\n\n");
+    process.stdout.write(`- JSON: ${jsonPath}\n`);
+    process.stdout.write(`- Markdown: ${markdownPath}\n`);
+  }
 }
 
 function configuredProjectRef(config, args = []) {

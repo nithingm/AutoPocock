@@ -1,0 +1,47 @@
+{
+  "schema_version": "github-project-view-plan/v1",
+  "generated_at": "2026-06-25T23:19:14.145Z",
+  "repository": {
+    "owner": "nithingm",
+    "repo": "AutoPocock",
+    "project_url": "https://github.com/users/nithingm/projects/1",
+    "project_id": "",
+    "project_number": "1"
+  },
+  "api_status": {
+    "view_mutations_available": false,
+    "reason": "GitHub CLI/GraphQL expose ProjectV2 project, item, and field mutations, but not ProjectV2 view create/update/rename mutations."
+  },
+  "summary": {
+    "recommended_views": 6,
+    "inspection_available": true,
+    "present": 5,
+    "missing": 0,
+    "drift": 1
+  },
+  "actions": [
+    {
+      "type": "manual_rename_view",
+      "view_name": "Validation",
+      "current_name": " Validation",
+      "view_number": 5,
+      "reason": "Recommended view exists only with name drift."
+    }
+  ],
+  "verification": {
+    "command": "pnpm ops github:init",
+    "expected": "Project View Inspection reports all recommended views as present and no Project View Drift entries remain."
+  },
+  "workarounds": [
+    {
+      "name": "template_project_copy",
+      "status": "candidate",
+      "guidance": "For fresh setups, maintain a template Project with the desired views and empirically verify whether GitHub's Project copy flow preserves those views before using it as the bootstrap path."
+    },
+    {
+      "name": "browser_ui_automation",
+      "status": "last_resort",
+      "guidance": "A one-off browser automation helper can drive the GitHub UI, but it should stay outside core automation because Project view UI selectors and flows are not stable contracts."
+    }
+  ]
+}

@@ -4,10 +4,12 @@ import { test } from "node:test";
 import {
   DEFAULT_LABEL_DEFINITIONS,
   buildCanonicalLabelDefinitions,
+  buildProjectViewPlan,
   createGitHubBootstrapReport,
   inspectProjectFields,
   inspectProjectViews,
   planProjectCreateCommand,
+  renderProjectViewPlanMarkdown,
 } from "../scripts/lib/github-init.mjs";
 
 function makeConfig() {
@@ -138,6 +140,7 @@ test("project field inspection plans missing configured fields and reports Proje
   assert.match(report.text, /## Project View Inspection/);
   assert.match(report.text, /present: Intake \(TABLE_LAYOUT\)/);
   assert.match(report.text, /Project View Drift: Validation \(name expected "Validation" actual " Validation"\)/);
+  assert.equal(report.projectViewInspection.find((view) => view.name === "Validation").status, "drift");
   assert.match(report.text, /## Planned Project View Changes/);
   assert.match(report.text, /No automatic Project view changes are available through GitHub CLI\/GraphQL/);
 });
@@ -218,6 +221,37 @@ test("Project view inspection detects exact-name misses and whitespace drift", (
   assert.equal(inspection[1].drift[0].field, "name");
   assert.equal(inspection[1].drift[0].actual, " Validation");
   assert.equal(inspection[2].status, "missing");
+});
+
+test("Project view plan converts inspection gaps into a prepared human step", () => {
+  const inspection = inspectProjectViews(["Intake", "Validation", "Done"], [
+    { name: "Intake", layout: "TABLE_LAYOUT", number: 1 },
+    { name: " Validation", layout: "TABLE_LAYOUT", number: 2 },
+  ]);
+  const plan = buildProjectViewPlan({
+    repository: {
+      owner: "example",
+      repo: "repo",
+      projectNumber: "7",
+    },
+    projectViews: ["Intake", "Validation", "Done"],
+    projectViewInspection: inspection,
+    generatedAt: "2026-06-25T00:00:00.000Z",
+  });
+  const markdown = renderProjectViewPlanMarkdown(plan);
+
+  assert.equal(plan.api_status.view_mutations_available, false);
+  assert.equal(plan.summary.present, 1);
+  assert.equal(plan.summary.missing, 1);
+  assert.equal(plan.summary.drift, 1);
+  assert.deepEqual(
+    plan.actions.map((action) => action.type),
+    ["manual_create_view", "manual_rename_view"],
+  );
+  assert.match(markdown, /Create Project view: Done \(TABLE_LAYOUT\)/);
+  assert.match(markdown, /Rename Project view #2:  Validation -> Validation/);
+  assert.match(markdown, /Command: `pnpm ops github:init`/);
+  assert.match(markdown, /template_project_copy/);
 });
 
 test("Project creation is planned for fresh setups without a project reference", async () => {

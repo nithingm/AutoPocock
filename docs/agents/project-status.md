@@ -31,7 +31,7 @@ pnpm test
 
 Observed result:
 
-- 227 tests passed
+- 229 tests passed
 - 0 tests failed
 
 This proves the current local source tree is internally coherent.
@@ -53,6 +53,7 @@ Observed result:
 - `setup` reports git, node, pnpm, GitHub CLI/auth, Codex provider, and workflow directories ready. Claude Code is supported by the provider registry for live runs with `--provider claude`; setup still uses Codex as the default provider readiness check.
 - `gh auth status` reports account `nithingm` with Project access sufficient for the strict verifier.
 - `github:init` remains dry-run-first and reports existing label and Project field drift without mutating GitHub. The guarded `--apply --create-project` path now creates a fresh Project only when no Project reference is configured, and the explicit `--apply --create-project-fields` path created the missing configured optional Project fields on Project 1.
+- `github:init -- --write-view-plan` writes a Prepared Human Step for exact Project view workarounds. The latest live artifact reports all recommended views present except the existing leading-space name drift ` Validation` -> `Validation`, which still requires a manual UI rename because ProjectV2 view mutations are unavailable.
 - `github:export -- --issue 45` writes a queue snapshot with 0 active non-Done items; issue `#45` is absent because it is closed and reconciled to Done.
 - the workflow console starts on an ephemeral local port, serves `/`, returns `/api/state`, and closes cleanly.
 - GitHub Actions CI on PR `#56` runs `pnpm install --frozen-lockfile`, `pnpm test`, and `pnpm smoke:console`; the latest run is green.
@@ -158,7 +159,7 @@ The local Ralph run state is stale: it still records `#45` as `in_progress` and 
 
 The core landing and tracker reconciliation are complete. Remaining work is product hardening beyond the current local prototype:
 
-1. GitHub Project view setup is inspectable through GraphQL, including missing-view and name-drift reports. Creation and renaming remain manual because GitHub CLI/GraphQL do not expose ProjectV2 view mutations.
+1. GitHub Project view setup is inspectable through GraphQL, including missing-view and name-drift reports. Creation and renaming remain manual because GitHub CLI/GraphQL do not expose ProjectV2 view mutations, but `pnpm ops github:init -- --write-view-plan` now creates a durable Prepared Human Step with exact actions and verification guidance.
 2. Package the GitHub ref distributed lock path beyond the landed scheduler dispatch policy, `claim-locks` text/JSON audit, orphan cleanup command, scheduled GitHub Actions audit, and Actions run-summary dashboard: external operator dashboards only if needed.
 3. Build or choose the actual hardened Docker provider image, then rerun `pnpm ops docker:validate` against it. The stock `node:22-bookworm` image passes `node`/`git` checks but does not contain `pnpm` or the Codex provider CLI. Docker cleanup policy is now implemented for stopped AutoPocock-managed containers; declared credential/cache volumes remain operator-owned and are intentionally not auto-deleted.
 4. Add more provider adapters only when a concrete provider boundary is needed beyond Codex and Claude Code.

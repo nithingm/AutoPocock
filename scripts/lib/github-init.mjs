@@ -298,6 +298,128 @@ export function inspectProjectViews(recommendedViews = [], existingViews = []) {
   });
 }
 
+export function buildProjectViewPlan({
+  repository = {},
+  projectViews = [],
+  projectViewInspection = [],
+  generatedAt = new Date().toISOString(),
+} = {}) {
+  const missing = projectViewInspection.filter((view) => view.status === "missing");
+  const drift = projectViewInspection.filter((view) => view.status === "drift");
+  const present = projectViewInspection.filter((view) => view.status === "present");
+  const projectUrl = repository.projectUrl
+    || (repository.owner && repository.projectNumber ? `https://github.com/users/${repository.owner}/projects/${repository.projectNumber}` : "");
+  const inspectionAvailable = projectViewInspection.length > 0;
+
+  return {
+    schema_version: "github-project-view-plan/v1",
+    generated_at: generatedAt,
+    repository: {
+      owner: repository.owner || "",
+      repo: repository.repo || "",
+      project_url: projectUrl,
+      project_id: repository.projectId || "",
+      project_number: repository.projectNumber || "",
+    },
+    api_status: {
+      view_mutations_available: false,
+      reason: "GitHub CLI/GraphQL expose ProjectV2 project, item, and field mutations, but not ProjectV2 view create/update/rename mutations.",
+    },
+    summary: {
+      recommended_views: projectViews.length,
+      inspection_available: inspectionAvailable,
+      present: present.length,
+      missing: missing.length,
+      drift: drift.length,
+    },
+    actions: [
+      ...missing.map((view) => ({
+        type: "manual_create_view",
+        view_name: view.name,
+        expected_layout: "TABLE_LAYOUT",
+        reason: "Recommended view is missing from the Project.",
+      })),
+      ...drift.map((view) => ({
+        type: "manual_rename_view",
+        view_name: view.name,
+        current_name: view.actual?.name || "",
+        view_number: view.number || view.actual?.number || "",
+        reason: "Recommended view exists only with name drift.",
+      })),
+    ],
+    verification: {
+      command: "pnpm ops github:init",
+      expected: "Project View Inspection reports all recommended views as present and no Project View Drift entries remain.",
+    },
+    workarounds: [
+      {
+        name: "template_project_copy",
+        status: "candidate",
+        guidance: "For fresh setups, maintain a template Project with the desired views and empirically verify whether GitHub's Project copy flow preserves those views before using it as the bootstrap path.",
+      },
+      {
+        name: "browser_ui_automation",
+        status: "last_resort",
+        guidance: "A one-off browser automation helper can drive the GitHub UI, but it should stay outside core automation because Project view UI selectors and flows are not stable contracts.",
+      },
+    ],
+  };
+}
+
+export function renderProjectViewPlanMarkdown(plan) {
+  const lines = [
+    "# Prepared Human Step: GitHub Project Views",
+    "",
+    `Generated: ${plan.generated_at}`,
+    `Project: ${plan.repository.project_url || plan.repository.project_id || plan.repository.project_number || "unconfigured"}`,
+    "",
+    "## API Status",
+    "",
+    `- View mutations available: ${plan.api_status.view_mutations_available ? "yes" : "no"}`,
+    `- Reason: ${plan.api_status.reason}`,
+    "",
+    "## Summary",
+    "",
+    `- Recommended views: ${plan.summary.recommended_views}`,
+    `- Inspection available: ${plan.summary.inspection_available ? "yes" : "no"}`,
+    `- Present: ${plan.summary.present}`,
+    `- Missing: ${plan.summary.missing}`,
+    `- Drift: ${plan.summary.drift}`,
+    "",
+    "## Manual Actions",
+    "",
+  ];
+
+  if (plan.actions.length === 0) {
+    lines.push("- None. Re-run verification before relying on this snapshot.");
+  } else {
+    for (const action of plan.actions) {
+      if (action.type === "manual_create_view") {
+        lines.push(`- Create Project view: ${action.view_name} (${action.expected_layout}).`);
+      } else if (action.type === "manual_rename_view") {
+        lines.push(`- Rename Project view${action.view_number ? ` #${action.view_number}` : ""}: ${action.current_name} -> ${action.view_name}.`);
+      }
+    }
+  }
+
+  lines.push(
+    "",
+    "## Verification",
+    "",
+    `- Command: \`${plan.verification.command}\``,
+    `- Expected: ${plan.verification.expected}`,
+    "",
+    "## Workarounds",
+    "",
+  );
+
+  for (const workaround of plan.workarounds) {
+    lines.push(`- ${workaround.name} (${workaround.status}): ${workaround.guidance}`);
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
 function formatMismatch(mismatch) {
   return `${mismatch.field} expected "${mismatch.expected}" actual "${mismatch.actual}"`;
 }
@@ -654,6 +776,7 @@ export async function createGitHubBootstrapReport(config, options = {}) {
     labelInspection,
     createCommands,
     projectFieldInspection,
+    projectViewInspection,
     projectCreateCommand,
     projectFieldCreateCommands,
     applyResults,
