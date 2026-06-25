@@ -51,7 +51,7 @@ The manual OS assumes GitHub is the live tracker, but the repo stays local-first
 - Configure `.ai/ops.config.json` with the target GitHub owner, repo, and Project reference.
 - Install and authenticate `gh` before any GitHub-backed step such as `pnpm ops github:init`, `pnpm ops github:export`, `pnpm ops schedule -- --apply`, `pnpm ops mirror -- --apply`, or `pnpm ops feedback -- --apply`.
 - Run `pnpm ops github:init` first as a dry run. The validated behavior is bootstrap reporting plus missing-label creation with `-- --apply`, fresh Project creation with `-- --apply --create-project --project-title "Name"` when no Project reference is configured, and missing configured Project field creation with `-- --apply --create-project-fields`.
-- Create or connect the GitHub Project deliberately. `github:init` refuses to create a duplicate Project when `.ai/ops.config.json` already has a Project URL, ID, or number. It still does not create Project views for you.
+- Create or connect the GitHub Project deliberately. `github:init` refuses to create a duplicate Project when `.ai/ops.config.json` already has a Project URL, ID, or number. It inspects recommended Project views through GraphQL and reports missing views or name drift, but GitHub still requires manual view creation or renaming.
 - Keep the required Project fields aligned with `docs/agents/board.md` and `.ai/ops.config.json`: `Execution Stage`, `Execution Lane`, `Queue Class`, `Risk`, `Dependency`, `Conflict Surface`, `Feature Track`, and `Dispatch ID`.
 
 ## Structure

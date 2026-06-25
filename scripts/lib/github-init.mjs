@@ -229,6 +229,75 @@ export function planProjectFieldCreateCommands(projectFieldInspection, { project
     });
 }
 
+function normalizeExistingProjectView(view) {
+  if (!view) {
+    return null;
+  }
+
+  return {
+    name: view.name || "",
+    normalizedName: String(view.name || "").trim().toLowerCase(),
+    layout: view.layout || "",
+    number: view.number || "",
+  };
+}
+
+export function inspectProjectViews(recommendedViews = [], existingViews = []) {
+  const existingByName = new Map(
+    (existingViews || [])
+      .map(normalizeExistingProjectView)
+      .filter(Boolean)
+      .map((view) => [view.name.toLowerCase(), view]),
+  );
+  const existingByTrimmedName = new Map(
+    (existingViews || [])
+      .map(normalizeExistingProjectView)
+      .filter(Boolean)
+      .map((view) => [view.normalizedName, view]),
+  );
+
+  return (recommendedViews || []).map((name) => {
+    const expectedName = String(name || "");
+    const exact = existingByName.get(expectedName.toLowerCase());
+    if (exact) {
+      return {
+        name: expectedName,
+        status: "present",
+        layout: exact.layout,
+        number: exact.number,
+        actual: exact,
+        drift: [],
+      };
+    }
+
+    const trimmedMatch = existingByTrimmedName.get(expectedName.trim().toLowerCase());
+    if (trimmedMatch) {
+      return {
+        name: expectedName,
+        status: "drift",
+        layout: trimmedMatch.layout,
+        number: trimmedMatch.number,
+        actual: trimmedMatch,
+        drift: [
+          {
+            field: "name",
+            expected: expectedName,
+            actual: trimmedMatch.name,
+          },
+        ],
+      };
+    }
+
+    return {
+      name: expectedName,
+      status: "missing",
+      layout: "",
+      number: "",
+      drift: [],
+    };
+  });
+}
+
 function formatMismatch(mismatch) {
   return `${mismatch.field} expected "${mismatch.expected}" actual "${mismatch.actual}"`;
 }
@@ -297,6 +366,7 @@ export function renderGitHubBootstrapReport({
   projectFields = [],
   projectFieldInspection = [],
   projectViews = [],
+  projectViewInspection = [],
   createCommands = [],
   projectFieldCreateCommands = [],
   applyResults = [],
@@ -468,10 +538,42 @@ export function renderGitHubBootstrapReport({
     lines.push(`- ${view}`);
   }
 
+  lines.push("", "## Project View Inspection", "");
+  if (projectViewInspection.length === 0) {
+    lines.push("- Status: unavailable");
+  } else {
+    for (const view of projectViewInspection) {
+      if (view.status === "missing") {
+        lines.push(`- missing: ${view.name}`);
+        continue;
+      }
+
+      if (view.status === "drift") {
+        lines.push(`- Project View Drift: ${view.name} (${view.drift.map(formatMismatch).join("; ")})`);
+        continue;
+      }
+
+      lines.push(`- present: ${view.name} (${view.layout || "layout unknown"})`);
+    }
+  }
+
+  lines.push("", "## Planned Project View Changes", "");
+  if (projectViewInspection.some((view) => view.status === "missing" || view.status === "drift")) {
+    lines.push("- No automatic Project view changes are available through GitHub CLI/GraphQL.");
+    for (const view of projectViewInspection.filter((candidate) => candidate.status === "missing")) {
+      lines.push(`- manual create: ${view.name}`);
+    }
+    for (const view of projectViewInspection.filter((candidate) => candidate.status === "drift")) {
+      lines.push(`- manual rename: ${view.actual.name} -> ${view.name}`);
+    }
+  } else {
+    lines.push("- None");
+  }
+
   lines.push("", "## Notes", "");
   lines.push("- Project creation is allowed only with `--apply --create-project` and no existing configured Project reference.");
   lines.push("- Project fields are dry-run-first and are created only with `--apply --create-project-fields`.");
-  lines.push("- Project views are still report-only because the GitHub CLI does not expose view creation.");
+  lines.push("- Project views are inspected through GraphQL when available; creation and renaming remain manual because GitHub CLI/GraphQL do not expose ProjectV2 view mutations.");
   lines.push("- Tracker Drift is reported for canonical label mismatches and never auto-corrected.");
 
   return `${lines.join("\n")}\n`;
@@ -516,6 +618,8 @@ export async function createGitHubBootstrapReport(config, options = {}) {
   const allProjectFields = configuredProjectFields(config);
   const hasProjectFieldInspection = Object.hasOwn(options, "existingProjectFields");
   const projectFieldInspection = hasProjectFieldInspection || options.createProject ? inspectProjectFields(allProjectFields, options.existingProjectFields || []) : [];
+  const hasProjectViewInspection = Object.hasOwn(options, "existingProjectViews");
+  const projectViewInspection = hasProjectViewInspection ? inspectProjectViews(config.projectSchema?.recommendedViews || [], options.existingProjectViews || []) : [];
   const owner = options.repository?.owner || config.github?.owner || "";
   const title = projectTitle(config, options);
   const projectCreateCommand = planProjectCreateCommand({ owner, title });
@@ -572,6 +676,7 @@ export async function createGitHubBootstrapReport(config, options = {}) {
       projectFields: config.projectSchema?.requiredFields || [],
       projectFieldInspection,
       projectViews: config.projectSchema?.recommendedViews || [],
+      projectViewInspection,
       createCommands,
       projectFieldCreateCommands,
       applyResults,

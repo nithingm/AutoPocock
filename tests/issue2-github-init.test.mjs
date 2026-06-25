@@ -6,6 +6,7 @@ import {
   buildCanonicalLabelDefinitions,
   createGitHubBootstrapReport,
   inspectProjectFields,
+  inspectProjectViews,
   planProjectCreateCommand,
 } from "../scripts/lib/github-init.mjs";
 
@@ -109,12 +110,16 @@ test("label color and description mismatches are reported as Tracker Drift witho
   assert.doesNotMatch(report.text, /would create: needs-triage/);
 });
 
-test("project field inspection plans missing configured fields while views remain report-only", async () => {
+test("project field inspection plans missing configured fields and reports Project view drift", async () => {
   const config = makeConfig();
   const report = await createGitHubBootstrapReport(config, {
     existingLabels: buildCanonicalLabelDefinitions(config),
     existingProjectFields: [
       { name: "Execution Stage", type: "ProjectV2SingleSelectField", options: [{ name: "Inbox" }, { name: "Done" }] },
+    ],
+    existingProjectViews: [
+      { name: "Intake", layout: "TABLE_LAYOUT", number: 1 },
+      { name: " Validation", layout: "TABLE_LAYOUT", number: 2 },
     ],
   });
 
@@ -130,7 +135,11 @@ test("project field inspection plans missing configured fields while views remai
   assert.match(report.text, /## Recommended Project Views/);
   assert.match(report.text, /- Intake/);
   assert.match(report.text, /- Validation/);
-  assert.match(report.text, /Project views are still report-only because the GitHub CLI does not expose view creation/);
+  assert.match(report.text, /## Project View Inspection/);
+  assert.match(report.text, /present: Intake \(TABLE_LAYOUT\)/);
+  assert.match(report.text, /Project View Drift: Validation \(name expected "Validation" actual " Validation"\)/);
+  assert.match(report.text, /## Planned Project View Changes/);
+  assert.match(report.text, /No automatic Project view changes are available through GitHub CLI\/GraphQL/);
 });
 
 test("apply mode creates missing Project fields only with the explicit project-field flag", async () => {
@@ -196,6 +205,19 @@ test("Project field drift is reported instead of mutated", () => {
   assert.match(inspection[0].drift[0].expected, /Inbox, Done/);
   assert.match(inspection[0].drift[0].actual, /Inbox, Ready/);
   assert.equal(inspection[1].status, "present");
+});
+
+test("Project view inspection detects exact-name misses and whitespace drift", () => {
+  const inspection = inspectProjectViews(["Intake", "Validation", "Done"], [
+    { name: "Intake", layout: "TABLE_LAYOUT", number: 1 },
+    { name: " Validation", layout: "TABLE_LAYOUT", number: 2 },
+  ]);
+
+  assert.equal(inspection[0].status, "present");
+  assert.equal(inspection[1].status, "drift");
+  assert.equal(inspection[1].drift[0].field, "name");
+  assert.equal(inspection[1].drift[0].actual, " Validation");
+  assert.equal(inspection[2].status, "missing");
 });
 
 test("Project creation is planned for fresh setups without a project reference", async () => {

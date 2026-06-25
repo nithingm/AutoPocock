@@ -135,4 +135,4 @@ Execution lanes:
 - Local issue templates are verified from the working tree.
 - Fresh Project creation is allowed only with `--apply --create-project` and no existing configured Project reference.
 - Project fields are reported by default and created only with `--apply --create-project-fields`.
-- Project views are reported, not created, in the first version.
+- Project views are inspected through GraphQL and drift-reported, but creation and renaming remain manual because GitHub CLI/GraphQL do not expose ProjectV2 view mutations.

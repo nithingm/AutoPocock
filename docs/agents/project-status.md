@@ -157,7 +157,7 @@ The local Ralph run state is stale: it still records `#45` as `in_progress` and 
 
 The core landing and tracker reconciliation are complete. Remaining work is product hardening beyond the current local prototype:
 
-1. Automate GitHub Project view setup beyond the current report-first bootstrap contract.
+1. GitHub Project view setup is inspectable through GraphQL, including missing-view and name-drift reports. Creation and renaming remain manual because GitHub CLI/GraphQL do not expose ProjectV2 view mutations.
 2. Replace tracker-visible claim leases with true distributed compare-and-swap locking for multiple runners.
 3. Validate concrete hardened Docker images and provider credential packages for the deployment environment.
 4. Add more provider adapters only when a concrete provider boundary is needed beyond Codex and Claude Code.

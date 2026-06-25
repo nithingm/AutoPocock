@@ -1537,8 +1537,10 @@ async function gitHubInit(args = []) {
   const project = configuredProjectRef(config, args);
   let existingLabels = [];
   let existingProjectFields = [];
+  let existingProjectViews = [];
   let labelInspectionAvailable = false;
   let projectFieldInspectionAvailable = false;
+  let projectViewInspectionAvailable = false;
 
   if (apply && !ghVersion.available) {
     throw new Error("gh CLI is required for github:init -- --apply. Install it from https://cli.github.com/.");
@@ -1600,6 +1602,41 @@ async function gitHubInit(args = []) {
     }
   }
 
+  if (ghVersion.available && auth?.available && (project.projectId || (project.projectNumber && project.owner))) {
+    try {
+      const projectOwnerKind = String(project.projectUrl || "").includes("/orgs/") ? "organization" : "user";
+      const viewsResult = await runCommand("gh", project.projectId
+        ? [
+            "api",
+            "graphql",
+            "--raw-field",
+            "query=query($projectId: ID!) { node(id: $projectId) { ... on ProjectV2 { views(first: 50) { nodes { name number layout filter } } } } }",
+            "-f",
+            `projectId=${project.projectId}`,
+          ]
+        : [
+            "api",
+            "graphql",
+            "--raw-field",
+            projectOwnerKind === "organization"
+              ? "query=query($owner: String!, $number: Int!) { organization(login: $owner) { projectV2(number: $number) { views(first: 50) { nodes { name number layout filter } } } } }"
+              : "query=query($owner: String!, $number: Int!) { user(login: $owner) { projectV2(number: $number) { views(first: 50) { nodes { name number layout filter } } } } }",
+            "-f",
+            `owner=${project.owner}`,
+            "-F",
+            `number=${Number(project.projectNumber)}`,
+          ]);
+      const parsed = JSON.parse(viewsResult.stdout || "{}");
+      existingProjectViews = parsed.data?.node?.views?.nodes
+        || parsed.data?.user?.projectV2?.views?.nodes
+        || parsed.data?.organization?.projectV2?.views?.nodes
+        || [];
+      projectViewInspectionAvailable = true;
+    } catch {
+      existingProjectViews = [];
+    }
+  }
+
   if (createProjectFields && !createProject && !projectFieldInspectionAvailable) {
     throw new Error("github:init -- --create-project-fields could not inspect existing Project fields. Fix Project access before applying.");
   }
@@ -1618,6 +1655,7 @@ async function gitHubInit(args = []) {
     repository: project,
     existingLabels,
     ...(projectFieldInspectionAvailable ? { existingProjectFields } : {}),
+    ...(projectViewInspectionAvailable ? { existingProjectViews } : {}),
     templatePresent: await pathExists(templatePath),
     runner: async (command, args) => runCommand(command, [...args, ...repoArgs]),
     projectRunner: async (command, args) => runCommand(command, args),
@@ -1630,7 +1668,7 @@ async function gitHubInit(args = []) {
   process.stdout.write("- Use `pnpm ops github:init -- --apply` for missing label creation.\n");
   process.stdout.write("- Use `pnpm ops github:init -- --apply --create-project --project-title \"Name\"` only for fresh setups without a configured Project reference.\n");
   process.stdout.write("- Use `pnpm ops github:init -- --apply --create-project-fields` to create missing configured Project fields.\n");
-  process.stdout.write("- Create or adjust GitHub Project views manually; view creation is still outside GitHub CLI coverage.\n");
+  process.stdout.write("- Create, rename, or adjust GitHub Project views manually when Project View Inspection reports missing views or drift; GitHub CLI/GraphQL do not expose ProjectV2 view mutations.\n");
 }
 
 function configuredProjectRef(config, args = []) {
