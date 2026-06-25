@@ -32,6 +32,31 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: pnpm ops claim-locks -- --json --output claim-locks.json
 
+      - name: Write audit summary
+        run: |
+          node --input-type=module <<'NODE' >> "$GITHUB_STEP_SUMMARY"
+          import { readFileSync } from "node:fs";
+
+          const report = JSON.parse(readFileSync("claim-locks.json", "utf8"));
+          console.log("## Distributed Claim Locks");
+          console.log("");
+          console.log(`- Repository: ${report.repository.name}`);
+          console.log(`- Remote lock refs: ${report.summary.remote_lock_refs}`);
+          console.log(`- Active: ${report.summary.active}`);
+          console.log(`- Stale: ${report.summary.stale}`);
+          console.log(`- Orphaned: ${report.summary.orphaned}`);
+          console.log("");
+          if (report.locks.length === 0) {
+            console.log("No distributed claim locks are present.");
+          } else {
+            console.log("| Status | Ref | Dispatch | Runner | Expires |");
+            console.log("| --- | --- | --- | --- | --- |");
+            for (const lock of report.locks) {
+              console.log(`| ${lock.status} | \`${lock.ref}\` | ${lock.dispatch_id || "N/A"} | ${lock.claimed_by || "N/A"} | ${lock.expires_at || "N/A"} |`);
+            }
+          }
+          NODE
+
       - name: Upload claim lock report
         uses: actions/upload-artifact@v4
         with:
