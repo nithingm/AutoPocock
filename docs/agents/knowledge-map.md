@@ -136,7 +136,7 @@ Observed:
 The core landing and tracker reconciliation are complete. Remaining work is product hardening beyond the current local prototype:
 
 1. GitHub Project views are now inspected and drift-reported through GraphQL; creation and renaming remain manual because GitHub CLI/GraphQL do not expose ProjectV2 view mutations.
-2. Distributed claim locking now has an opt-in GitHub ref CAS path plus `claim-locks` audit/orphan cleanup; remaining deployment work is scheduler integration and always-on operator dashboards.
+2. Distributed claim locking now has an opt-in GitHub ref CAS path plus `claim-locks` text/JSON audit and orphan cleanup; remaining deployment work is scheduler integration, continuous monitoring jobs, and deployed operator dashboards.
 3. Run `pnpm ops docker:validate` against the concrete hardened Docker images and provider credential packages chosen for deployment.
 4. Re-run full local tests plus strict live tracker verification after any follow-up updates.
 

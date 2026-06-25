@@ -1422,6 +1422,27 @@ test("claim-locks reports remote GitHub lock refs and deletes only orphaned refs
   assert.match(dryRun.stdout, /orphaned: refs\/heads\/autopocock-locks\/dispatch-orphan-lock/);
   assert.match(dryRun.stdout, /No remote lock refs were deleted/);
 
+  const jsonDryRun = await runOps(cwd, ["claim-locks", "--json"], {
+    env: fakeGh.env,
+  });
+  const dryRunReport = JSON.parse(jsonDryRun.stdout);
+  assert.equal(jsonDryRun.code, 0, jsonDryRun.stderr);
+  assert.equal(dryRunReport.repository.name, "nithingm/AutoPocock");
+  assert.equal(dryRunReport.summary.remote_lock_refs, 2);
+  assert.equal(dryRunReport.summary.active, 1);
+  assert.equal(dryRunReport.summary.orphaned, 1);
+  assert.equal(dryRunReport.actions.orphaned_refs_available_for_delete[0], "refs/heads/autopocock-locks/dispatch-orphan-lock");
+  assert.equal(dryRunReport.locks.find((lock) => lock.status === "active").dispatch_id, "dispatch-active-lock");
+
+  const reportPath = path.join(cwd, ".ai", "claim-locks.json");
+  const outputDryRun = await runOps(cwd, ["claim-locks", "--output", reportPath], {
+    env: fakeGh.env,
+  });
+  const outputReport = JSON.parse(await readFile(reportPath, "utf8"));
+  assert.equal(outputDryRun.code, 0, outputDryRun.stderr);
+  assert.match(outputDryRun.stdout, /JSON report:/);
+  assert.equal(outputReport.summary.remote_lock_refs, 2);
+
   const apply = await runOps(cwd, [
     "claim-locks",
     "--apply",
@@ -1429,13 +1450,18 @@ test("claim-locks reports remote GitHub lock refs and deletes only orphaned refs
     "solo-operator",
     "--reason",
     "Remove abandoned lock refs",
+    "--output",
+    path.join(cwd, ".ai", "claim-locks-applied.json"),
   ], {
     env: fakeGh.env,
   });
   const ghLog = await readFile(fakeGh.logPath, "utf8");
+  const applyReport = JSON.parse(await readFile(path.join(cwd, ".ai", "claim-locks-applied.json"), "utf8"));
 
   assert.equal(apply.code, 0, apply.stderr);
   assert.match(apply.stdout, /Deleted orphaned lock refs: 1/);
+  assert.equal(applyReport.summary.deleted_orphaned, 1);
+  assert.deepEqual(applyReport.actions.deleted_refs, ["refs/heads/autopocock-locks/dispatch-orphan-lock"]);
   assert.match(ghLog, /api -X DELETE repos\/nithingm\/AutoPocock\/git\/refs\/heads\/autopocock-locks\/dispatch-orphan-lock/);
   assert.doesNotMatch(ghLog, /DELETE repos\/nithingm\/AutoPocock\/git\/refs\/heads\/autopocock-locks\/dispatch-active-lock/);
 });

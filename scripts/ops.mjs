@@ -97,6 +97,8 @@ Usage:
   pnpm ops claim -- --dispatch docs/agents/dispatches/dispatch-id.json --claimed-by runner-name --apply-lock-ref
   pnpm ops claim-status -- --dispatch docs/agents/dispatches/dispatch-id.json --max-age-hours 24
   pnpm ops claim-locks
+  pnpm ops claim-locks -- --json
+  pnpm ops claim-locks -- --output .ai/claim-locks.json
   pnpm ops claim-locks -- --apply --approved-by solo-operator --reason "Remove abandoned lock refs"
   pnpm ops reclaim -- --dispatch docs/agents/dispatches/dispatch-id.json --approved-by solo-operator --reason "Runner abandoned work"
   pnpm ops reclaim -- --dispatch docs/agents/dispatches/dispatch-id.json --approved-by solo-operator --reason "Runner abandoned work" --apply-tracker
@@ -2182,6 +2184,91 @@ async function inspectGitHubClaimLocks({ config, args, maxAgeHours }) {
   });
 }
 
+function claimLockReportEntry(lock) {
+  const artifact = lock.artifact || {};
+  const claim = artifact.claim || {};
+  return {
+    ref: lock.ref,
+    sha: lock.sha || "",
+    status: lock.status,
+    stale: Boolean(lock.stale),
+    dispatch_id: artifact.dispatch_id || "",
+    issue_id: artifact.issue_id || "",
+    claimed_by: claim.claimed_by || "",
+    claimed_at: claim.claimed_at || "",
+    expires_at: claim.expires_at || "",
+    artifact_path: lock.fullPath || "",
+  };
+}
+
+function buildClaimLockReport({ inspection, owner, repo, apply, maxAgeHours, deletedRefs = [] }) {
+  const locks = inspection.map(claimLockReportEntry);
+  const active = locks.filter((lock) => lock.status === "active");
+  const stale = locks.filter((lock) => lock.status === "stale");
+  const orphaned = locks.filter((lock) => lock.status === "orphaned");
+  return {
+    generated_at: nowIso(),
+    mode: apply ? "apply" : "dry-run",
+    repository: {
+      owner,
+      repo,
+      name: `${owner}/${repo}`,
+    },
+    max_age_hours: maxAgeHours,
+    summary: {
+      remote_lock_refs: locks.length,
+      active: active.length,
+      stale: stale.length,
+      orphaned: orphaned.length,
+      deleted_orphaned: deletedRefs.length,
+    },
+    locks,
+    actions: {
+      deleted_refs: deletedRefs,
+      stale_refs_requiring_reclaim: stale.map((lock) => lock.ref),
+      orphaned_refs_available_for_delete: apply ? [] : orphaned.map((lock) => lock.ref),
+    },
+  };
+}
+
+function renderClaimLockReport(report) {
+  const lines = [
+    "# Distributed Claim Locks",
+    "",
+    `Mode: ${report.mode}`,
+    `Repository: ${report.repository.name}`,
+    `Remote lock refs: ${report.summary.remote_lock_refs}`,
+    `Active: ${report.summary.active}`,
+    `Stale: ${report.summary.stale}`,
+    `Orphaned: ${report.summary.orphaned}`,
+    "",
+    "## Locks",
+  ];
+
+  if (report.locks.length === 0) {
+    lines.push("- None");
+  } else {
+    for (const lock of report.locks) {
+      if (lock.status === "active" || lock.status === "stale") {
+        lines.push(`- ${lock.status}: ${lock.ref} -> ${lock.dispatch_id || path.basename(lock.artifact_path)}`);
+      } else {
+        lines.push(`- orphaned: ${lock.ref}`);
+      }
+    }
+  }
+
+  if (report.mode === "dry-run") {
+    lines.push("", "No remote lock refs were deleted. Add `--apply --approved-by <operator> --reason \"...\"` to delete orphaned refs only.");
+    return lines;
+  }
+
+  lines.push("", `Deleted orphaned lock refs: ${report.summary.deleted_orphaned}`);
+  if (report.actions.stale_refs_requiring_reclaim.length > 0) {
+    lines.push("Stale matched locks were not deleted here; use `pnpm ops reclaim-expired -- --apply --apply-lock-ref` so local dispatch state and remote refs move together.");
+  }
+  return lines;
+}
+
 async function gitHubExport(args) {
   const config = await loadJson(".ai/ops.config.json");
   const project = configuredProjectRef(config, args);
@@ -3156,6 +3243,8 @@ async function reclaimExpired(args) {
 
 async function claimLocks(args) {
   const apply = args.includes("--apply");
+  const json = args.includes("--json");
+  const output = readOption(args, "output");
   const approvedBy = readOption(args, "approved-by");
   const reason = readOption(args, "reason");
   const maxAgeHours = parsePositiveNumber(readOption(args, "max-age-hours", "24"), 24, "claim-locks --max-age-hours");
@@ -3172,49 +3261,48 @@ async function claimLocks(args) {
 
   const inspection = await inspectGitHubClaimLocks({ config, args, maxAgeHours });
   const orphaned = inspection.filter((lock) => lock.status === "orphaned");
-  const active = inspection.filter((lock) => lock.status === "active");
-  const stale = inspection.filter((lock) => lock.status === "stale");
-  const lines = [
-    "# Distributed Claim Locks",
-    "",
-    `Mode: ${apply ? "apply" : "dry-run"}`,
-    `Repository: ${owner}/${repo}`,
-    `Remote lock refs: ${inspection.length}`,
-    `Active: ${active.length}`,
-    `Stale: ${stale.length}`,
-    `Orphaned: ${orphaned.length}`,
-    "",
-    "## Locks",
-  ];
-
-  if (inspection.length === 0) {
-    lines.push("- None");
-  } else {
-    for (const lock of inspection) {
-      if (lock.status === "active" || lock.status === "stale") {
-        lines.push(`- ${lock.status}: ${lock.ref} -> ${lock.artifact.dispatch_id || path.basename(lock.fullPath)}`);
-      } else {
-        lines.push(`- orphaned: ${lock.ref}`);
-      }
-    }
-  }
 
   if (!apply) {
-    lines.push("", "No remote lock refs were deleted. Add `--apply --approved-by <operator> --reason \"...\"` to delete orphaned refs only.");
-    process.stdout.write(`${lines.join("\n")}\n`);
+    const report = buildClaimLockReport({ inspection, owner, repo, apply, maxAgeHours });
+    if (output) {
+      const outputPath = path.isAbsolute(output) ? output : path.join(cwd, output);
+      await mkdir(path.dirname(outputPath), { recursive: true });
+      await writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+    }
+    if (json) {
+      process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    } else {
+      const lines = renderClaimLockReport(report);
+      if (output) {
+        lines.push("", `JSON report: ${path.isAbsolute(output) ? output : path.join(cwd, output)}`);
+      }
+      process.stdout.write(`${lines.join("\n")}\n`);
+    }
     return;
   }
 
+  const deletedRefs = [];
   for (const lock of orphaned) {
     const apiRef = lock.ref.replace(/^refs\//, "");
     await runGh(["api", "-X", "DELETE", `repos/${owner}/${repo}/git/refs/${apiRef}`]);
+    deletedRefs.push(lock.ref);
   }
 
-  lines.push("", `Deleted orphaned lock refs: ${orphaned.length}`);
-  if (stale.length > 0) {
-    lines.push("Stale matched locks were not deleted here; use `pnpm ops reclaim-expired -- --apply --apply-lock-ref` so local dispatch state and remote refs move together.");
+  const report = buildClaimLockReport({ inspection, owner, repo, apply, maxAgeHours, deletedRefs });
+  if (output) {
+    const outputPath = path.isAbsolute(output) ? output : path.join(cwd, output);
+    await mkdir(path.dirname(outputPath), { recursive: true });
+    await writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
   }
-  process.stdout.write(`${lines.join("\n")}\n`);
+  if (json) {
+    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+  } else {
+    const lines = renderClaimLockReport(report);
+    if (output) {
+      lines.push("", `JSON report: ${path.isAbsolute(output) ? output : path.join(cwd, output)}`);
+    }
+    process.stdout.write(`${lines.join("\n")}\n`);
+  }
 }
 
 async function dockerValidate(args) {

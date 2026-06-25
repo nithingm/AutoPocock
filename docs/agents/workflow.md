@@ -69,6 +69,8 @@ The Umbrella CLI stages the workflow:
 - `pnpm ops github:export`: export non-`Done` GitHub Project issues into `.ai/queue.json`
 - `pnpm ops claim -- --dispatch docs/agents/dispatches/dispatch-id.json --claimed-by runner-name --apply-lock-ref`: acquire an atomic GitHub ref lock before mutating the local dispatch claim
 - `pnpm ops claim-locks`: inspect distributed GitHub claim lock refs and identify active, stale, and orphaned locks
+- `pnpm ops claim-locks -- --json`: print the distributed lock audit as machine-readable JSON for monitors and dashboards
+- `pnpm ops claim-locks -- --output .ai/claim-locks.json`: persist the distributed lock audit JSON while keeping normal operator text output
 - `pnpm ops claim-locks -- --apply --approved-by solo-operator --reason "Remove abandoned lock refs"`: delete orphaned distributed lock refs only
 - `pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json`: validate a claimed dispatch without invoking a provider
 - `pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --prepare-worktree`: prepare the local worktree directory for a claimed worktree dispatch, then print the Runner Plan
@@ -227,7 +229,7 @@ To make the whole flow work end-to-end as the Solo Operator:
 - Use `pnpm ops docker:validate -- --image <image> --provider <codex|claude> --require-command node,pnpm,git --docker-env <NAME>` before relying on a Docker execution image for live work. Then use `pnpm ops dispatch -- --isolation-mode docker --docker-image node:22-bookworm ...` or claim an existing Docker dispatch, and run `pnpm ops run -- --prepare-docker` to inspect the exact Docker command. Launch it with `pnpm ops run -- --execute --execute-docker` only after the container boundary is acceptable. Credentials are never forwarded implicitly; use `--docker-env` for allowed env vars and `--docker-volume` for extra writable mounts. Add `--live-provider` only when the image has the selected provider CLI and credentials.
 - Use `pnpm ops worktree-clean` periodically to remove old unreferenced `.worktrees` directories; referenced dispatches and Provider Runs are always kept by that command.
 - Use `pnpm ops claim-status` to inspect old claims before restarting or recycling work.
-- Use `pnpm ops claim-locks` to audit distributed GitHub lock refs. Apply mode deletes orphaned refs only; stale matched refs should go through `reclaim-expired --apply-lock-ref`.
+- Use `pnpm ops claim-locks` to audit distributed GitHub lock refs. Add `--json` for machine-readable stdout or `--output .ai/claim-locks.json` for a monitor/dashboard snapshot. Apply mode deletes orphaned refs only; stale matched refs should go through `reclaim-expired --apply-lock-ref`.
 - Use `pnpm ops reclaim` only when you have decided the old claim should be abandoned; the reclaim command records that approval locally. Add `--apply-tracker` when a tracker-visible runner lease should be cleared from the Project item, and `--apply-lock-ref` when a GitHub distributed lock ref should be released.
 - Use `pnpm ops reclaim-expired` as the dry-run-first batch path for expired leases. It requires `--apply --approved-by --reason` before returning dispatches to `queued`; add `--apply-lock-ref` to release recorded distributed lock refs during batch recovery.
 - Use `pnpm ops run` as the final local validation step before any future provider execution layer.

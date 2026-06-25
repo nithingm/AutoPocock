@@ -67,7 +67,7 @@ Execution lanes:
 - Conflict Surface is manually declared first, with opt-in CLI inference from queue write surfaces and active PR files.
 - Initial dispatch creates Dispatch Artifacts instead of calling subagents.
 - Dispatch Artifacts are JSON canonical plus markdown mirror.
-- Dispatch Claims use local filesystem locks around claim/reclaim mutations. Claims record explicit lease expiry metadata, `claim --apply-tracker` publishes the runner lease to the GitHub Project `Runner` field for external visibility, and `claim --apply-lock-ref` can acquire an atomic GitHub branch ref under `refs/heads/autopocock-locks/` before local mutation. `reclaim --apply-lock-ref` and `reclaim-expired --apply-lock-ref` release those distributed lock refs during approved recovery.
+- Dispatch Claims use local filesystem locks around claim/reclaim mutations. Claims record explicit lease expiry metadata, `claim --apply-tracker` publishes the runner lease to the GitHub Project `Runner` field for external visibility, and `claim --apply-lock-ref` can acquire an atomic GitHub branch ref under `refs/heads/autopocock-locks/` before local mutation. `reclaim --apply-lock-ref` and `reclaim-expired --apply-lock-ref` release those distributed lock refs during approved recovery. `claim-locks --json` and `claim-locks --output` expose the distributed lock audit as a machine-readable monitor/dashboard contract.
 
 ## Agent Execution Direction
 
@@ -120,7 +120,7 @@ Execution lanes:
 - How much of GitHub Project view setup should be automated beyond the current report-first contract; Project creation and field creation now have explicit apply paths.
 - Additional provider adapters beyond Codex and Claude Code, if the product boundary expands to more CLIs or hosted runners.
 - Docker runtime policy is accepted in `docs/adr/2026-06-25-docker-runtime-policy.md` and `pnpm ops docker:validate` now checks proposed images; remaining work is to run that probe against the actual hardened deployment images and provider credential packages.
-- How to package the distributed GitHub ref lock path for always-on multi-runner deployments beyond the landed `claim-locks` audit/cleanup command, including scheduler integration and operator dashboards.
+- How to package the distributed GitHub ref lock path for always-on multi-runner deployments beyond the landed `claim-locks` audit/cleanup and JSON report contract, including scheduler integration and deployed operator dashboards.
 - External/user-level memory sync is intentionally outside the current product boundary; approved Durable Memory decisions stay repo-local unless a future explicit connector boundary is designed and approved.
 
 ## Locked GitHub Bootstrap Decisions
