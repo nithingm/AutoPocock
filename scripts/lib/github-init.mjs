@@ -233,10 +233,65 @@ function formatMismatch(mismatch) {
   return `${mismatch.field} expected "${mismatch.expected}" actual "${mismatch.actual}"`;
 }
 
+function projectTitle(config, options = {}) {
+  return options.projectTitle || config.github?.projectTitle || config.github?.repo || "AutoPocock";
+}
+
+export function planProjectCreateCommand({ owner = "", title = "" } = {}) {
+  if (!owner || !title) {
+    return null;
+  }
+
+  return {
+    command: "gh",
+    args: ["project", "create", "--owner", owner, "--title", title, "--format", "json"],
+    project: {
+      owner,
+      title,
+    },
+  };
+}
+
+function parseProjectCreateOutput(execution) {
+  try {
+    const parsed = JSON.parse(execution.stdout || "{}");
+    return {
+      id: parsed.id || "",
+      number: parsed.number || parsed.projectNumber || "",
+      url: parsed.url || "",
+      title: parsed.title || "",
+    };
+  } catch {
+    return {
+      id: "",
+      number: "",
+      url: "",
+      title: "",
+    };
+  }
+}
+
+export async function applyProjectCreate(options = {}) {
+  const runner = options.projectRunner || options.runner || (async () => ({ code: 0, stdout: "", stderr: "" }));
+  const planned = planProjectCreateCommand(options);
+  if (!planned) {
+    return null;
+  }
+
+  const execution = await runner(planned.command, planned.args, planned.project);
+  return {
+    ...planned,
+    execution,
+    createdProject: parseProjectCreateOutput(execution),
+  };
+}
+
 export function renderGitHubBootstrapReport({
   mode = "dry-run",
   gh = { available: false, version: "", authenticated: false, authDetail: "" },
   repository = {},
+  projectCreateCommand = null,
+  projectCreateResult = null,
   labelInspection = [],
   templatePresent = false,
   projectFields = [],
@@ -246,6 +301,7 @@ export function renderGitHubBootstrapReport({
   projectFieldCreateCommands = [],
   applyResults = [],
   projectFieldApplyResults = [],
+  createProject = false,
   createProjectFields = false,
 }) {
   const lines = [
@@ -256,7 +312,7 @@ export function renderGitHubBootstrapReport({
   ];
 
   if (mode === "apply") {
-    lines.push("Only missing canonical labels and explicitly requested missing Project fields were eligible for creation.");
+    lines.push("Only missing canonical labels and explicitly requested Project/project-field resources were eligible for creation.");
     lines.push("Existing labels and Project fields were left untouched, including any drift.");
   } else {
     lines.push("No GitHub labels, issues, projects, fields, or comments were created or modified.");
@@ -286,6 +342,28 @@ export function renderGitHubBootstrapReport({
   lines.push(`- Project URL: ${repository.projectUrl || "unset"}`);
   lines.push(`- Project ID: ${repository.projectId || "unset"}`);
   lines.push(`- Project number: ${repository.projectNumber || "unset"}`);
+
+  lines.push("", "## Project Creation", "");
+  if (!projectCreateCommand) {
+    lines.push("- None");
+  } else if (createProject) {
+    lines.push(`- would create: ${projectCreateCommand.project.title} for ${projectCreateCommand.project.owner}`);
+  } else {
+    lines.push(`- available with --create-project: ${projectCreateCommand.project.title} for ${projectCreateCommand.project.owner}`);
+  }
+
+  if (mode === "apply") {
+    lines.push("", "## Project Create Results", "");
+    if (!createProject) {
+      lines.push("- Skipped. Add `--create-project` only for fresh setups without a configured Project reference.");
+    } else if (!projectCreateResult) {
+      lines.push("- No Project was created.");
+    } else {
+      lines.push(`- created: ${projectCreateResult.createdProject.title || projectCreateCommand.project.title}`);
+      lines.push(`- number: ${projectCreateResult.createdProject.number || "unknown"}`);
+      lines.push(`- url: ${projectCreateResult.createdProject.url || "unknown"}`);
+    }
+  }
 
   lines.push("", "## Canonical Labels", "");
   for (const label of labelInspection) {
@@ -391,6 +469,7 @@ export function renderGitHubBootstrapReport({
   }
 
   lines.push("", "## Notes", "");
+  lines.push("- Project creation is allowed only with `--apply --create-project` and no existing configured Project reference.");
   lines.push("- Project fields are dry-run-first and are created only with `--apply --create-project-fields`.");
   lines.push("- Project views are still report-only because the GitHub CLI does not expose view creation.");
   lines.push("- Tracker Drift is reported for canonical label mismatches and never auto-corrected.");
@@ -436,20 +515,32 @@ export async function createGitHubBootstrapReport(config, options = {}) {
   const createCommands = planLabelCreateCommands(labelInspection);
   const allProjectFields = configuredProjectFields(config);
   const hasProjectFieldInspection = Object.hasOwn(options, "existingProjectFields");
-  const projectFieldInspection = hasProjectFieldInspection ? inspectProjectFields(allProjectFields, options.existingProjectFields || []) : [];
+  const projectFieldInspection = hasProjectFieldInspection || options.createProject ? inspectProjectFields(allProjectFields, options.existingProjectFields || []) : [];
+  const owner = options.repository?.owner || config.github?.owner || "";
+  const title = projectTitle(config, options);
+  const projectCreateCommand = planProjectCreateCommand({ owner, title });
   const projectFieldCreateCommands = hasProjectFieldInspection
     ? planProjectFieldCreateCommands(projectFieldInspection, {
         projectNumber: options.repository?.projectNumber || config.github?.projectNumber || "",
-        owner: options.repository?.owner || config.github?.owner || "",
+        owner,
+      })
+    : options.createProject
+    ? planProjectFieldCreateCommands(projectFieldInspection, {
+        projectNumber: "<created-project-number>",
+        owner,
       })
     : [];
   const mode = options.apply ? "apply" : "dry-run";
   const applyResults = options.apply ? await applyMissingCanonicalLabels(labelInspection, options) : [];
+  const projectCreateResult = options.apply && options.createProject
+    ? await applyProjectCreate({ ...options, owner, title })
+    : null;
+  const fieldProjectNumber = projectCreateResult?.createdProject?.number || options.repository?.projectNumber || config.github?.projectNumber || "";
   const projectFieldApplyResults = options.apply && options.createProjectFields
     ? await applyMissingProjectFields(projectFieldInspection, {
         ...options,
-        projectNumber: options.repository?.projectNumber || config.github?.projectNumber || "",
-        owner: options.repository?.owner || config.github?.owner || "",
+        projectNumber: fieldProjectNumber,
+        owner,
       })
     : [];
 
@@ -459,8 +550,10 @@ export async function createGitHubBootstrapReport(config, options = {}) {
     labelInspection,
     createCommands,
     projectFieldInspection,
+    projectCreateCommand,
     projectFieldCreateCommands,
     applyResults,
+    projectCreateResult,
     projectFieldApplyResults,
     text: renderGitHubBootstrapReport({
       mode,
@@ -472,6 +565,8 @@ export async function createGitHubBootstrapReport(config, options = {}) {
         projectId: options.repository?.projectId || config.github?.projectId || "",
         projectNumber: options.repository?.projectNumber || config.github?.projectNumber || "",
       },
+      projectCreateCommand,
+      projectCreateResult,
       labelInspection,
       templatePresent: Boolean(options.templatePresent),
       projectFields: config.projectSchema?.requiredFields || [],
@@ -481,6 +576,7 @@ export async function createGitHubBootstrapReport(config, options = {}) {
       projectFieldCreateCommands,
       applyResults,
       projectFieldApplyResults,
+      createProject: Boolean(options.createProject),
       createProjectFields: Boolean(options.createProjectFields),
     }),
   };

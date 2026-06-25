@@ -102,6 +102,7 @@ Usage:
   pnpm ops schedule -- --queue .ai/queue.json --apply
   pnpm ops schedule -- --queue .ai/queue.json --dispatch
   pnpm ops github:init
+  pnpm ops github:init -- --apply --create-project --project-title "AutoPocock"
   pnpm ops github:init -- --apply --create-project-fields
   pnpm ops github:export
   pnpm ops ralph -- --plan docs/agents/loop-specs/plan.json
@@ -1408,7 +1409,9 @@ async function gitHubInit(args = []) {
   const config = await loadJson(".ai/ops.config.json");
   const templatePath = path.join(cwd, ".github", "ISSUE_TEMPLATE", "agentic-slice.md");
   const apply = args.includes("--apply");
+  const createProject = args.includes("--create-project");
   const createProjectFields = args.includes("--create-project-fields");
+  const projectTitle = readOption(args, "project-title", config.github?.repo || "AutoPocock");
   const ghVersion = await commandAvailable("gh");
   const auth = ghVersion.available ? await commandAvailable("gh", ["auth", "status"]) : null;
   const repoArgs = config.github?.owner && config.github?.repo ? ["--repo", `${config.github.owner}/${config.github.repo}`] : [];
@@ -1440,11 +1443,23 @@ async function gitHubInit(args = []) {
     throw new Error("github:init -- --apply could not inspect existing labels. Fix `gh` repository access before applying.");
   }
 
+  if (createProject && !apply) {
+    throw new Error("github:init -- --create-project requires --apply.");
+  }
+
+  if (createProject && hasProjectReference(project)) {
+    throw new Error("github:init -- --create-project refuses to run when a Project reference is already configured.");
+  }
+
+  if (createProject && !project.owner) {
+    throw new Error("github:init -- --create-project requires a configured GitHub owner or --owner.");
+  }
+
   if (createProjectFields && !apply) {
     throw new Error("github:init -- --create-project-fields requires --apply.");
   }
 
-  if (createProjectFields && !project.projectNumber) {
+  if (createProjectFields && !createProject && !project.projectNumber) {
     throw new Error("github:init -- --create-project-fields requires a configured GitHub Project number or --project-number.");
   }
 
@@ -1466,13 +1481,15 @@ async function gitHubInit(args = []) {
     }
   }
 
-  if (createProjectFields && !projectFieldInspectionAvailable) {
+  if (createProjectFields && !createProject && !projectFieldInspectionAvailable) {
     throw new Error("github:init -- --create-project-fields could not inspect existing Project fields. Fix Project access before applying.");
   }
 
   const report = await createGitHubBootstrapReport(config, {
     apply,
+    createProject,
     createProjectFields,
+    projectTitle,
     gh: {
       available: ghVersion.available,
       version: ghVersion.stdout.split(/\r?\n/)[0] || "",
@@ -1484,6 +1501,7 @@ async function gitHubInit(args = []) {
     ...(projectFieldInspectionAvailable ? { existingProjectFields } : {}),
     templatePresent: await pathExists(templatePath),
     runner: async (command, args) => runCommand(command, [...args, ...repoArgs]),
+    projectRunner: async (command, args) => runCommand(command, args),
     projectFieldRunner: async (command, args) => runCommand(command, args),
   });
 
@@ -1491,6 +1509,7 @@ async function gitHubInit(args = []) {
   process.stdout.write("\n## Next Steps\n\n");
   process.stdout.write("- Configure GitHub owner/repo/project reference in .ai/ops.config.json when ready.\n");
   process.stdout.write("- Use `pnpm ops github:init -- --apply` for missing label creation.\n");
+  process.stdout.write("- Use `pnpm ops github:init -- --apply --create-project --project-title \"Name\"` only for fresh setups without a configured Project reference.\n");
   process.stdout.write("- Use `pnpm ops github:init -- --apply --create-project-fields` to create missing configured Project fields.\n");
   process.stdout.write("- Create or adjust GitHub Project views manually; view creation is still outside GitHub CLI coverage.\n");
 }

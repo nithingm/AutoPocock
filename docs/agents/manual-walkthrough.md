@@ -8,8 +8,8 @@ Use the command shapes below exactly, then replace the example issue, PR, title,
 
 - Configure `.ai/ops.config.json` with the intended GitHub owner, repo, and Project reference.
 - Install and authenticate `gh` before any GitHub-backed step.
-- Create or connect the GitHub Project manually in this version and keep its fields aligned with `docs/agents/board.md`.
-- Treat `pnpm ops github:init` as a bootstrap and drift report. With `-- --apply`, it creates missing labels; with `-- --apply --create-project-fields`, it also creates missing configured Project fields. It does not create Projects or views.
+- Create or connect the GitHub Project deliberately and keep its fields aligned with `docs/agents/board.md`.
+- Treat `pnpm ops github:init` as a bootstrap and drift report. With `-- --apply`, it creates missing labels; with `-- --apply --create-project --project-title "Name"`, it creates a fresh Project only when no Project reference is configured; with `-- --apply --create-project-fields`, it also creates missing configured Project fields. It does not create Project views.
 
 ## Choose Your Entry Path
 
@@ -94,7 +94,7 @@ pnpm ops github:init
 
 Expected artifact or output:
 - Prints a dry-run **GitHub Tracker Bootstrap** report.
-- Reports `gh` readiness, auth status, canonical labels, Tracker Drift, issue template presence, and required Project fields/views.
+- Reports `gh` readiness, auth status, canonical labels, Tracker Drift, fresh Project creation availability, issue template presence, and required Project fields/views.
 - Does not mutate GitHub unless `-- --apply` is added.
 
 Common failure modes:
@@ -102,6 +102,7 @@ Common failure modes:
 - `gh auth status` is not authenticated.
 - `.ai/ops.config.json` points at the wrong repo or project.
 - Tracker Drift is reported for existing labels; this is informational unless you are missing canonical labels.
+- Fresh Project creation refuses to run when a Project URL, ID, or number is already configured.
 
 Exact next command:
 

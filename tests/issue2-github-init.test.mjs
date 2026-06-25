@@ -6,6 +6,7 @@ import {
   buildCanonicalLabelDefinitions,
   createGitHubBootstrapReport,
   inspectProjectFields,
+  planProjectCreateCommand,
 } from "../scripts/lib/github-init.mjs";
 
 function makeConfig() {
@@ -195,4 +196,64 @@ test("Project field drift is reported instead of mutated", () => {
   assert.match(inspection[0].drift[0].expected, /Inbox, Done/);
   assert.match(inspection[0].drift[0].actual, /Inbox, Ready/);
   assert.equal(inspection[1].status, "present");
+});
+
+test("Project creation is planned for fresh setups without a project reference", async () => {
+  const config = makeConfig();
+  config.github.projectNumber = "";
+  const report = await createGitHubBootstrapReport(config, {
+    existingLabels: buildCanonicalLabelDefinitions(config),
+    createProject: true,
+    projectTitle: "Fresh Project",
+  });
+
+  assert.deepEqual(planProjectCreateCommand({ owner: "example", title: "Fresh Project" }).args, [
+    "project",
+    "create",
+    "--owner",
+    "example",
+    "--title",
+    "Fresh Project",
+    "--format",
+    "json",
+  ]);
+  assert.match(report.text, /Project Creation/);
+  assert.match(report.text, /would create: Fresh Project for example/);
+  assert.match(report.text, /would create with --create-project-fields: Execution Stage/);
+});
+
+test("apply mode can create a fresh Project and then create fields on that Project number", async () => {
+  const config = makeConfig();
+  config.github.projectNumber = "";
+  const projectCalls = [];
+  const projectFieldCalls = [];
+  const report = await createGitHubBootstrapReport(config, {
+    apply: true,
+    createProject: true,
+    createProjectFields: true,
+    projectTitle: "Fresh Project",
+    existingLabels: buildCanonicalLabelDefinitions(config),
+    projectRunner: async (command, args, project) => {
+      projectCalls.push({ command, args, project });
+      return {
+        code: 0,
+        stdout: JSON.stringify({ number: 9, url: "https://github.com/users/example/projects/9", title: "Fresh Project" }),
+        stderr: "",
+      };
+    },
+    projectFieldRunner: async (command, args, field) => {
+      projectFieldCalls.push({ command, args, field });
+      return { code: 0, stdout: `created ${field.name}`, stderr: "" };
+    },
+  });
+
+  assert.deepEqual(projectCalls.map((call) => call.project.title), ["Fresh Project"]);
+  assert.equal(projectFieldCalls.length, 3);
+  assert.deepEqual(projectFieldCalls.map((call) => call.args[2]), ["9", "9", "9"]);
+  assert.match(report.text, /Project Create Results/);
+  assert.match(report.text, /created: Fresh Project/);
+  assert.match(report.text, /number: 9/);
+  assert.match(report.text, /created: Execution Stage/);
+  assert.match(report.text, /created: Dispatch ID/);
+  assert.match(report.text, /created: Review Capacity Cost/);
 });
