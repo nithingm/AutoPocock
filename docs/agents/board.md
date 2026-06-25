@@ -118,14 +118,16 @@ Initial dispatch creates artifacts only:
 
 ## Dispatch Claims
 
-The first claim implementation is file-based:
+The claim implementation is file-backed and locally locked:
 
+- It creates an exclusive sidecar lock before claim/reclaim mutation.
+- It re-reads dispatch JSON inside the lock before changing state.
 - It updates dispatch JSON from `queued` to `claimed`.
 - It records `claimed_by`, `claimed_at`, and `isolation_mode`.
 - It refuses to claim dispatches that are not `queued`.
 - `pnpm ops claim-status` reports claim age and whether the claim appears stale.
 - `pnpm ops reclaim` returns a claimed dispatch to `queued` only with explicit Solo Operator approval and a recorded reason.
-- Atomic claiming belongs in the future runner layer.
+- Distributed claim coordination beyond the local filesystem belongs in the future runner layer.
 
 ## Runner Stub
 

@@ -1,5 +1,5 @@
 import { execFile, spawn } from "node:child_process";
-import { access, mkdir, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, readdir, rm, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -349,6 +349,28 @@ async function listDispatchArtifacts() {
   }
 
   return artifacts;
+}
+
+async function withDispatchArtifactLock(fullPath, callback) {
+  const lockPath = `${fullPath}.lock`;
+
+  try {
+    await mkdir(lockPath);
+  } catch (error) {
+    if (error?.code === "EEXIST") {
+      throw new Error(
+        `Dispatch artifact is locked by another claim or reclaim operation: ${fullPath}. If no runner is active, remove ${lockPath} after inspection.`,
+      );
+    }
+
+    throw error;
+  }
+
+  try {
+    return await callback();
+  } finally {
+    await rm(lockPath, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 function renderDispatchResolutionGuidance({ command, args, status, issue = "", candidates }) {
@@ -2027,39 +2049,43 @@ async function claim(args) {
     throw new Error("Claim requires --claimed-by.");
   }
 
-  const { fullPath, artifact } = await resolveDispatchArtifact(args, { command: "claim", status: "queued" });
+  const { fullPath } = await resolveDispatchArtifact(args, { command: "claim", status: "queued" });
 
-  if (artifact.status !== "queued") {
-    throw new Error(`Dispatch ${artifact.dispatch_id || fullPath} is ${artifact.status}, not queued.`);
-  }
+  await withDispatchArtifactLock(fullPath, async () => {
+    const artifact = JSON.parse(await readFile(fullPath, "utf8"));
 
-  const isolationMode = requestedIsolationMode || artifact.isolation_mode || "branch";
+    if (artifact.status !== "queued") {
+      throw new Error(`Dispatch ${artifact.dispatch_id || fullPath} is ${artifact.status}, not queued.`);
+    }
 
-  if (artifact.isolation_mode && artifact.isolation_mode !== isolationMode) {
-    throw new Error(
-      `Claim isolation mode ${isolationMode} does not match dispatch isolation mode ${artifact.isolation_mode}.`,
-    );
-  }
+    const isolationMode = requestedIsolationMode || artifact.isolation_mode || "branch";
 
-  artifact.status = "claimed";
-  artifact.claim = {
-    claimed_by: claimedBy,
-    claimed_at: nowIso(),
-    isolation_mode: isolationMode,
-  };
+    if (artifact.isolation_mode && artifact.isolation_mode !== isolationMode) {
+      throw new Error(
+        `Claim isolation mode ${isolationMode} does not match dispatch isolation mode ${artifact.isolation_mode}.`,
+      );
+    }
 
-  if (!artifact.isolation_mode) {
-    artifact.isolation_mode = isolationMode;
-  }
+    artifact.status = "claimed";
+    artifact.claim = {
+      claimed_by: claimedBy,
+      claimed_at: nowIso(),
+      isolation_mode: isolationMode,
+    };
 
-  if (isolationMode === "worktree") {
-    artifact.worktree_path =
-      requestedWorktreePath || artifact.worktree_path || deriveWorktreePath(artifact.issue_id, artifact.title);
-  } else if (requestedWorktreePath) {
-    throw new Error("Claim accepts --worktree-path only when isolation mode is worktree.");
-  }
+    if (!artifact.isolation_mode) {
+      artifact.isolation_mode = isolationMode;
+    }
 
-  await writeFile(fullPath, `${JSON.stringify(artifact, null, 2)}\n`, "utf8");
+    if (isolationMode === "worktree") {
+      artifact.worktree_path =
+        requestedWorktreePath || artifact.worktree_path || deriveWorktreePath(artifact.issue_id, artifact.title);
+    } else if (requestedWorktreePath) {
+      throw new Error("Claim accepts --worktree-path only when isolation mode is worktree.");
+    }
+
+    await writeFile(fullPath, `${JSON.stringify(artifact, null, 2)}\n`, "utf8");
+  });
   process.stdout.write(`${fullPath}\n`);
 }
 
@@ -2101,25 +2127,29 @@ async function reclaim(args) {
     throw new Error("Reclaim requires --reason.");
   }
 
-  const { fullPath, artifact } = await resolveDispatchArtifact(args, { command: "reclaim", status: "claimed" });
+  const { fullPath } = await resolveDispatchArtifact(args, { command: "reclaim", status: "claimed" });
 
-  if (artifact.status !== "claimed" || !artifact.claim) {
-    throw new Error(`Dispatch ${artifact.dispatch_id || fullPath} is ${artifact.status}, not claimed.`);
-  }
+  await withDispatchArtifactLock(fullPath, async () => {
+    const artifact = JSON.parse(await readFile(fullPath, "utf8"));
 
-  const inspection = inspectClaimAge(artifact, Number.isFinite(maxAgeHours) ? maxAgeHours : 24);
-  const historyEntry = {
-    ...artifact.claim,
-    reclaimed_at: nowIso(),
-    reclaimed_by: approvedBy,
-    reclaim_reason: reason,
-    stale_at_reclaim: inspection.stale,
-    age_hours_at_reclaim: inspection.ageHours == null ? null : Number(inspection.ageHours.toFixed(2)),
-  };
+    if (artifact.status !== "claimed" || !artifact.claim) {
+      throw new Error(`Dispatch ${artifact.dispatch_id || fullPath} is ${artifact.status}, not claimed.`);
+    }
 
-  const reclaimed = reclaimDispatchArtifact(artifact, historyEntry);
+    const inspection = inspectClaimAge(artifact, Number.isFinite(maxAgeHours) ? maxAgeHours : 24);
+    const historyEntry = {
+      ...artifact.claim,
+      reclaimed_at: nowIso(),
+      reclaimed_by: approvedBy,
+      reclaim_reason: reason,
+      stale_at_reclaim: inspection.stale,
+      age_hours_at_reclaim: inspection.ageHours == null ? null : Number(inspection.ageHours.toFixed(2)),
+    };
 
-  await writeFile(fullPath, `${JSON.stringify(reclaimed, null, 2)}\n`, "utf8");
+    const reclaimed = reclaimDispatchArtifact(artifact, historyEntry);
+
+    await writeFile(fullPath, `${JSON.stringify(reclaimed, null, 2)}\n`, "utf8");
+  });
   process.stdout.write(`${fullPath}\n`);
   process.stdout.write(`Reclaimed by ${approvedBy}. Dispatch returned to queued.\n`);
 }

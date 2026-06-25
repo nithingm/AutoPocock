@@ -74,6 +74,7 @@ Evidence:
 
 - [x] `schedule -- --apply` updates GitHub Project fields only for scheduler-selected `DISPATCH` items.
 - [x] `schedule -- --dispatch` creates Dispatch Artifacts only for dispatchable queue items.
+- [x] `claim` and console claim/reclaim use an exclusive local dispatch-artifact lock before mutating claim state.
 - [x] `claim`, `run`, `claim-status`, and `reclaim` support safer artifact resolution and give exact follow-up commands on ambiguity.
 - [x] Missing queue and dispatch artifacts produce recovery guidance with exact commands.
 

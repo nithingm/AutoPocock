@@ -67,7 +67,7 @@ Execution lanes:
 - Conflict Surface is manually declared first, with optional CLI estimation later.
 - Initial dispatch creates Dispatch Artifacts instead of calling subagents.
 - Dispatch Artifacts are JSON canonical plus markdown mirror.
-- Dispatch Claims are file-based first, atomic later in the runner layer.
+- Dispatch Claims use local filesystem locks around claim/reclaim mutations; distributed runner coordination remains a future hardening layer.
 
 ## Agent Execution Direction
 
@@ -104,7 +104,7 @@ Execution lanes:
 - `pnpm ops schedule -- --apply`: update GitHub Project fields for `DISPATCH` decisions without creating dispatch artifacts.
 - `pnpm ops schedule -- --dispatch`: create dispatch artifacts from a Scheduler Plan.
 - `pnpm ops dispatch`: create audited manual dispatch artifacts, while scheduler-sourced dispatches are created by `schedule -- --dispatch`.
-- `pnpm ops claim`: file-based claim flow is implemented; a future extension can make claiming atomic across concurrent runners.
+- `pnpm ops claim`: local file-backed claiming uses an exclusive dispatch-artifact lock and re-reads state before mutation.
 - `pnpm ops run`: validate claimed dispatches, prepare worktrees, and execute through stub/live provider boundaries; a future extension can harden external runner deployment.
 - `pnpm ops review-prep`: validate Review Entry Gate inputs and generate advisory Review Prep when the gate passes.
 - `pnpm ops qa`: load issue, PR, handoff, completion, and review prep context from GitHub.
@@ -118,7 +118,7 @@ Execution lanes:
 - Docker image contract and mounted workspace layout.
 - How to infer advisory Conflict Surface from file paths and active PRs.
 - Whether local body-file mirroring should gain richer duplicate/comment-update behavior.
-- How to make Dispatch Claims atomic for concurrent runners beyond the current stale-claim inspection and explicit reclaim flow.
+- How to extend Dispatch Claim locking beyond local filesystem coordination for distributed runners.
 - How to summarize Durable Memory update proposals for Solo Operator approval.
 
 ## Locked GitHub Bootstrap Decisions

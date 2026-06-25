@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import http from "node:http";
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { enrichDagWithQuality } from "./dag-quality.mjs";
@@ -58,6 +58,24 @@ async function commandAvailable(command, args = [], options = {}) {
 
 async function loadJson(fullPath) {
   return JSON.parse(await readFile(fullPath, "utf8"));
+}
+
+async function withDispatchArtifactLock(fullPath, callback) {
+  const lockPath = `${fullPath}.lock`;
+  try {
+    await mkdir(lockPath);
+  } catch (error) {
+    if (error?.code === "EEXIST") {
+      throw new Error(`Dispatch artifact is locked by another claim or reclaim operation: ${fullPath}.`);
+    }
+    throw error;
+  }
+
+  try {
+    return await callback();
+  } finally {
+    await rm(lockPath, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 async function listArtifacts(root, relativeDir, extensions = [".md"]) {
@@ -1176,35 +1194,44 @@ async function applyQaAction(root, payload) {
 
 async function reclaimDispatch(root, payload) {
   const dispatchPath = safePath(root, payload.dispatch);
-  const artifact = await loadJson(dispatchPath);
-  const next = reclaimDispatchArtifact(artifact, {
-    reclaimed_at: new Date().toISOString(),
-    reclaimed_by: payload.approvedBy,
-    reason: payload.reason,
-    previous_claim: artifact.claim,
+  await withDispatchArtifactLock(dispatchPath, async () => {
+    const artifact = await loadJson(dispatchPath);
+    if (artifact.status !== "claimed" || !artifact.claim) {
+      throw new Error(`Dispatch ${artifact.dispatch_id} is ${artifact.status}, not claimed.`);
+    }
+    const next = reclaimDispatchArtifact(artifact, {
+      reclaimed_at: new Date().toISOString(),
+      reclaimed_by: payload.approvedBy,
+      reason: payload.reason,
+      previous_claim: artifact.claim,
+    });
+    await writeFile(dispatchPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
   });
-  await writeFile(dispatchPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
   return { path: dispatchPath };
 }
 
 async function claimDispatch(root, payload) {
   const dispatchPath = safePath(root, payload.dispatch);
-  const artifact = await loadJson(dispatchPath);
-  if (artifact.status !== "queued") {
-    throw new Error(`Dispatch ${artifact.dispatch_id} is ${artifact.status}, not queued.`);
-  }
-  artifact.status = "claimed";
-  artifact.claim = {
-    claimed_by: normalizeText(payload.claimedBy) || "solo-operator",
-    claimed_at: new Date().toISOString(),
-    isolation_mode: normalizeText(payload.isolationMode || artifact.isolation_mode || "worktree"),
-  };
-  artifact.isolation_mode = artifact.isolation_mode || artifact.claim.isolation_mode;
-  if (artifact.isolation_mode === "worktree" && !normalizeText(artifact.worktree_path)) {
-    artifact.worktree_path = deriveWorktreePath(root, artifact);
-  }
-  await writeFile(dispatchPath, `${JSON.stringify(artifact, null, 2)}\n`, "utf8");
-  return { path: dispatchPath, worktreePath: artifact.worktree_path || "" };
+  let worktreePath = "";
+  await withDispatchArtifactLock(dispatchPath, async () => {
+    const artifact = await loadJson(dispatchPath);
+    if (artifact.status !== "queued") {
+      throw new Error(`Dispatch ${artifact.dispatch_id} is ${artifact.status}, not queued.`);
+    }
+    artifact.status = "claimed";
+    artifact.claim = {
+      claimed_by: normalizeText(payload.claimedBy) || "solo-operator",
+      claimed_at: new Date().toISOString(),
+      isolation_mode: normalizeText(payload.isolationMode || artifact.isolation_mode || "worktree"),
+    };
+    artifact.isolation_mode = artifact.isolation_mode || artifact.claim.isolation_mode;
+    if (artifact.isolation_mode === "worktree" && !normalizeText(artifact.worktree_path)) {
+      artifact.worktree_path = deriveWorktreePath(root, artifact);
+    }
+    worktreePath = artifact.worktree_path || "";
+    await writeFile(dispatchPath, `${JSON.stringify(artifact, null, 2)}\n`, "utf8");
+  });
+  return { path: dispatchPath, worktreePath };
 }
 
 async function prepareDispatchWorktree(root, payload) {

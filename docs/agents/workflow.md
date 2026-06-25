@@ -47,7 +47,7 @@ The Umbrella CLI stages the workflow:
 - `pnpm ops mirror -- --artifact docs/agents/handoffs/file.md --issue 123`: dry-run a selective GitHub comment mirror for supported workflow artifacts
 - `pnpm ops feedback -- --issue 123 --finding "QA finding text"`: classify a QA finding into a Same-PR Fix candidate or a new bug draft, and write a local feedback artifact without mutating GitHub; add `--pr 456` only when a PR already exists, and add `--apply` only when you intentionally want the GitHub mutation
 - `pnpm ops dispatch -- --issue 123 --title "Implement slice" --source manual --override-reason "Solo Operator approved"`: create dispatch-ready artifacts without calling a subagent
-- `pnpm ops claim -- --dispatch docs/agents/dispatches/dispatch-id.json --claimed-by runner-name --isolation-mode worktree`: claim a queued dispatch artifact
+- `pnpm ops claim -- --dispatch docs/agents/dispatches/dispatch-id.json --claimed-by runner-name --isolation-mode worktree`: claim a queued dispatch artifact with an exclusive local artifact lock
 - `pnpm ops claim-status -- --dispatch docs/agents/dispatches/dispatch-id.json --max-age-hours 24`: inspect whether a claimed dispatch looks stale
 - `pnpm ops reclaim -- --dispatch docs/agents/dispatches/dispatch-id.json --approved-by solo-operator --reason "Runner abandoned work"`: explicitly return a claimed dispatch to `queued`
 - `pnpm ops qa -- --issue 123`: generate targeted QA for tracked work; add `--pr 456` only when a PR already exists and you want it called out in the checklist
@@ -186,7 +186,7 @@ To make the whole flow work end-to-end as the Solo Operator:
 - Keep issue slices bounded enough that one handoff, one review, and one QA pass still make sense.
 - Write real handoff, completion, and review-prep artifacts instead of placeholders, because strict QA now uses that context directly.
 - Export or prepare `.ai/queue.json`, then run `pnpm ops schedule -- --apply` to reserve eligible work on the Project, `pnpm ops schedule -- --dispatch` to create dispatch artifacts, or both flags together when you want the generated `Dispatch ID` reflected in GitHub.
-- Claim dispatches with a stable runner identity using `pnpm ops claim`; for worktree isolation, keep the derived or explicit `worktree_path` available locally.
+- Claim dispatches with a stable runner identity using `pnpm ops claim`; the command uses an exclusive local dispatch-artifact lock and re-reads state before mutation. For worktree isolation, keep the derived or explicit `worktree_path` available locally.
 - Use `pnpm ops run -- --prepare-worktree` when a claimed dispatch is worktree-isolated and you want the local directory created before any future execution layer.
 - Use `pnpm ops claim-status` to inspect old claims before restarting or recycling work.
 - Use `pnpm ops reclaim` only when you have decided the old claim should be abandoned; the reclaim command records that approval locally.

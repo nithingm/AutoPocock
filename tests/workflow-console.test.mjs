@@ -367,3 +367,27 @@ test("workflow console server supports artifact editing, execution controls, rev
     await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   }
 });
+
+test("workflow console claim respects dispatch artifact locks", async () => {
+  const cwd = await makeWorkspace();
+  const dispatchPath = path.join(cwd, "docs", "agents", "dispatches", "dispatch-1.json");
+  await mkdir(`${dispatchPath}.lock`);
+  const { server, port } = await startWorkflowConsole({ cwd, host: "127.0.0.1", port: 0 });
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/claim`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        dispatch: "docs/agents/dispatches/dispatch-1.json",
+        claimedBy: "runner-32",
+        isolationMode: "worktree",
+      }),
+    });
+    const dispatch = JSON.parse(await readFile(dispatchPath, "utf8"));
+
+    assert.equal(response.status, 500);
+    assert.equal(dispatch.status, "queued");
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  }
+});

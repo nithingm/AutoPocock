@@ -260,10 +260,12 @@ pnpm ops claim -- --dispatch docs/agents/dispatches/<dispatch-id>.json --claimed
 
 Expected artifact or output:
 - Updates the JSON **Dispatch Artifact** from `queued` to `claimed`.
+- Uses an exclusive local lock while mutating the **Dispatch Artifact**.
 - Prints the claimed dispatch path.
 
 Common failure modes:
 - The dispatch path does not exist. The command tells you to recover with `pnpm ops schedule -- --queue .ai/queue.json --dispatch`.
+- Another runner or console action is holding the dispatch lock. Inspect the runner state before removing a stale `.lock` directory.
 - The dispatch is already claimed.
 - `--isolation-mode` does not match the artifact's isolation mode.
 - If you try `--issue <issue-number>` while multiple dispatches exist for that issue, resolution can become ambiguous. Use `--dispatch` once multiple artifacts exist.

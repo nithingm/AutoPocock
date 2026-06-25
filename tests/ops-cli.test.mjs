@@ -1482,6 +1482,7 @@ test("claim preserves worktree isolation and derives a worktree path when needed
   assert.equal(result.code, 0);
   assert.equal(artifact.claim.isolation_mode, "worktree");
   assert.match(artifact.worktree_path, /\.worktrees[\\/]issue-9-runner-bridge$/);
+  await assert.rejects(stat(`${dispatchPath}.lock`), { code: "ENOENT" });
 });
 
 test("claim resolves a queued dispatch by issue when that dispatch is unambiguous", async () => {
@@ -1507,6 +1508,32 @@ test("claim resolves a queued dispatch by issue when that dispatch is unambiguou
   assert.match(result.stdout, new RegExp(escapeRegex(dispatchPath)));
   assert.equal(artifact.status, "claimed");
   assert.equal(artifact.claim.claimed_by, "runner-13");
+});
+
+test("claim refuses to mutate a dispatch while another claim lock is held", async () => {
+  const cwd = await makeWorkspace();
+  const dispatchPath = await writeDispatch(cwd, "dispatch-locked.json", {
+    dispatch_id: "dispatch-locked",
+    issue_id: "ISSUE-14",
+    title: "Locked claim",
+    status: "queued",
+    isolation_mode: "worktree",
+    worktree_path: "",
+    forbidden_actions: ["merge PR"],
+    expected_branch: "agent/issue-14-locked-claim",
+    handoff_artifact: "",
+    completion_report_target: "docs/agents/completions/dispatch-locked.md",
+    claim: null,
+  });
+  await mkdir(`${dispatchPath}.lock`);
+
+  const result = await runOps(cwd, ["claim", "--dispatch", dispatchPath, "--claimed-by", "runner-14"]);
+  const artifact = JSON.parse(await readFile(dispatchPath, "utf8"));
+
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /Dispatch artifact is locked by another claim or reclaim operation/);
+  assert.equal(artifact.status, "queued");
+  assert.equal(artifact.claim, null);
 });
 
 test("claim rejects isolation mode mismatches", async () => {
