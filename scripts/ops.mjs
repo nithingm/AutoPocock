@@ -102,6 +102,7 @@ Usage:
   pnpm ops schedule -- --queue .ai/queue.json --apply
   pnpm ops schedule -- --queue .ai/queue.json --dispatch
   pnpm ops github:init
+  pnpm ops github:init -- --apply --create-project-fields
   pnpm ops github:export
   pnpm ops ralph -- --plan docs/agents/loop-specs/plan.json
   pnpm ops ralph -- --plan docs/agents/loop-specs/plan.json --approve-wave wave-0 --approved-by solo-operator
@@ -1407,11 +1408,15 @@ async function gitHubInit(args = []) {
   const config = await loadJson(".ai/ops.config.json");
   const templatePath = path.join(cwd, ".github", "ISSUE_TEMPLATE", "agentic-slice.md");
   const apply = args.includes("--apply");
+  const createProjectFields = args.includes("--create-project-fields");
   const ghVersion = await commandAvailable("gh");
   const auth = ghVersion.available ? await commandAvailable("gh", ["auth", "status"]) : null;
   const repoArgs = config.github?.owner && config.github?.repo ? ["--repo", `${config.github.owner}/${config.github.repo}`] : [];
+  const project = configuredProjectRef(config, args);
   let existingLabels = [];
+  let existingProjectFields = [];
   let labelInspectionAvailable = false;
+  let projectFieldInspectionAvailable = false;
 
   if (apply && !ghVersion.available) {
     throw new Error("gh CLI is required for github:init -- --apply. Install it from https://cli.github.com/.");
@@ -1435,25 +1440,59 @@ async function gitHubInit(args = []) {
     throw new Error("github:init -- --apply could not inspect existing labels. Fix `gh` repository access before applying.");
   }
 
+  if (createProjectFields && !apply) {
+    throw new Error("github:init -- --create-project-fields requires --apply.");
+  }
+
+  if (createProjectFields && !project.projectNumber) {
+    throw new Error("github:init -- --create-project-fields requires a configured GitHub Project number or --project-number.");
+  }
+
+  if (ghVersion.available && auth?.available && project.projectNumber) {
+    try {
+      const fieldResult = await runCommand("gh", [
+        "project",
+        "field-list",
+        String(project.projectNumber),
+        "--owner",
+        project.owner,
+        "--format",
+        "json",
+      ]);
+      existingProjectFields = JSON.parse(fieldResult.stdout).fields || [];
+      projectFieldInspectionAvailable = true;
+    } catch {
+      existingProjectFields = [];
+    }
+  }
+
+  if (createProjectFields && !projectFieldInspectionAvailable) {
+    throw new Error("github:init -- --create-project-fields could not inspect existing Project fields. Fix Project access before applying.");
+  }
+
   const report = await createGitHubBootstrapReport(config, {
     apply,
+    createProjectFields,
     gh: {
       available: ghVersion.available,
       version: ghVersion.stdout.split(/\r?\n/)[0] || "",
       authenticated: Boolean(auth?.available),
       authDetail: auth?.stderr ? auth.stderr.split(/\r?\n/)[0] : "",
     },
-    repository: config.github || {},
+    repository: project,
     existingLabels,
+    ...(projectFieldInspectionAvailable ? { existingProjectFields } : {}),
     templatePresent: await pathExists(templatePath),
     runner: async (command, args) => runCommand(command, [...args, ...repoArgs]),
+    projectFieldRunner: async (command, args) => runCommand(command, args),
   });
 
   process.stdout.write(report.text);
   process.stdout.write("\n## Next Steps\n\n");
   process.stdout.write("- Configure GitHub owner/repo/project reference in .ai/ops.config.json when ready.\n");
-  process.stdout.write("- Use `pnpm ops github:init -- --apply` only for missing label creation.\n");
-  process.stdout.write("- Create or connect the GitHub Project manually in this first version.\n");
+  process.stdout.write("- Use `pnpm ops github:init -- --apply` for missing label creation.\n");
+  process.stdout.write("- Use `pnpm ops github:init -- --apply --create-project-fields` to create missing configured Project fields.\n");
+  process.stdout.write("- Create or adjust GitHub Project views manually; view creation is still outside GitHub CLI coverage.\n");
 }
 
 function configuredProjectRef(config, args = []) {

@@ -31,7 +31,7 @@ pnpm test
 
 Observed result:
 
-- 203 tests passed
+- 205 tests passed
 - 0 tests failed
 
 This proves the current local source tree is internally coherent.
@@ -52,7 +52,7 @@ Observed result:
 - `verify:project -- --strict-external` reports local readiness passed, GitHub Project read path passed, Project write scope present, and issue `#45` in a closed terminal state outside the active queue.
 - `setup` reports git, node, pnpm, GitHub CLI/auth, Codex provider, and workflow directories ready. Claude Code is supported by the provider registry for live runs with `--provider claude`; setup still uses Codex as the default provider readiness check.
 - `gh auth status` reports account `nithingm` with Project access sufficient for the strict verifier.
-- `github:init` remains dry-run-first and reports existing label drift without mutating GitHub.
+- `github:init` remains dry-run-first and reports existing label and Project field drift without mutating GitHub. The explicit `--apply --create-project-fields` path created the missing configured optional Project fields on Project 1.
 - `github:export -- --issue 45` writes a queue snapshot with 0 active non-Done items; issue `#45` is absent because it is closed and reconciled to Done.
 - the workflow console starts on an ephemeral local port, serves `/`, returns `/api/state`, and closes cleanly.
 - GitHub Actions CI on PR `#56` runs `pnpm install --frozen-lockfile`, `pnpm test`, and `pnpm smoke:console`; the latest run is green.
@@ -66,7 +66,7 @@ Current branch:
 - latest commits include the PR `#56` merge and post-merge status/verifier updates
 - merged PR: `https://github.com/nithingm/AutoPocock/pull/56`
 
-The landed baseline includes the manual OS, original GitHub-backed workflow hardening, automation-layer implementation, opt-in scheduler conflict inference, artifact and Provider Run mirror update/dedup behavior, durable memory proposal decision/apply flow, Codex plus Claude Code provider adapters, tests, CI workflow, and durable status/orientation artifacts.
+The landed baseline includes the manual OS, original GitHub-backed workflow hardening, automation-layer implementation, opt-in scheduler conflict inference, artifact and Provider Run mirror update/dedup behavior, durable memory proposal decision/apply flow, Codex plus Claude Code provider adapters, dry-run-first Project field creation, tests, CI workflow, and durable status/orientation artifacts.
 
 Landed source/test/docs include:
 
@@ -129,6 +129,8 @@ Issues closed after PR `#56` landed:
 
 The GitHub Project board has been reconciled for tracker closure. Issues `#44` through `#55` are closed, and their Project fields are set to Done/Closed.
 
+The configured optional Project fields `Review Capacity Cost`, `Runner`, `Last Scheduler Plan`, and `PR` were created through `pnpm ops github:init -- --apply --create-project-fields`. The remaining live Project drift is the existing `Execution Stage` option spelling `Ready To Slice` versus the configured `Ready to Slice`; bootstrap reports that drift but does not rewrite existing fields.
+
 The closed-issue Project field reconciliation for issues `#1` through `#32` was run before the open issue additions. Treat that as an applied reconciliation step, but continue to validate scheduler/export behavior through normal command output after source cleanup.
 
 The active queue export now reports 0 non-Done items. Strict verification treats issue `#45` as reconciled when it is absent from the active queue and confirmed closed.
@@ -153,7 +155,7 @@ The local Ralph run state is stale: it still records `#45` as `in_progress` and 
 
 The core landing and tracker reconciliation are complete. Remaining work is product hardening beyond the current local prototype:
 
-1. Automate GitHub Project creation, field creation, and view setup beyond the current report-first bootstrap contract.
+1. Automate fresh GitHub Project creation and view setup beyond the current report-first bootstrap contract.
 2. Add Docker runner isolation before high-concurrency AFK execution.
 3. Extend dispatch claim locking beyond local filesystem coordination for distributed runners.
 4. Decide whether approved repo-local Durable Memory decisions should sync into external/user-level memory stores.

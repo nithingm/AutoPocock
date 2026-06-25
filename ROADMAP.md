@@ -96,8 +96,8 @@ Execution lanes:
 
 - `pnpm ops github:init`: dry-run GitHub tracker setup using the `gh` CLI.
 - `pnpm ops github:init -- --apply`: create missing labels and verify local issue templates.
-- `pnpm ops github:init`: report required GitHub Project fields/views; do not create Projects in the first version.
-- `pnpm ops github:init -- --create-project`: future explicit project creation mode after label/export work is stable.
+- `pnpm ops github:init`: report required GitHub Project fields/views and Project field drift without mutating by default.
+- `pnpm ops github:init -- --apply --create-project-fields`: create missing configured GitHub Project fields while leaving existing drift untouched.
 - `pnpm ops github:export`: export GitHub issue/project metadata into `.ai/queue.json`.
 - `pnpm ops mirror`: summarize supported local workflow artifacts into dry-run GitHub comment bodies; `--apply` posts with an explicit GitHub mutation, and `--update-existing` refreshes a matching marked comment when present.
 - `pnpm ops memory-propose`: create durable memory proposal artifacts without editing durable memory directly.
@@ -114,7 +114,7 @@ Execution lanes:
 
 ## Open Design Questions
 
-- How much of GitHub Project creation, field creation, and view setup should be automated beyond the current report-first contract.
+- How much of GitHub Project creation and view setup should be automated beyond the current report-first contract; field creation now has an explicit apply path.
 - Additional provider adapters beyond Codex and Claude Code, if the product boundary expands to more CLIs or hosted runners.
 - Docker image contract and mounted workspace layout.
 - How to extend Dispatch Claim locking beyond local filesystem coordination for distributed runners.
@@ -132,4 +132,5 @@ Execution lanes:
 - `--apply` creates missing labels only.
 - Existing label drift is reported, not automatically rewritten.
 - Local issue templates are verified from the working tree.
-- Project fields and views are reported, not created, in the first version.
+- Project fields are reported by default and created only with `--apply --create-project-fields`.
+- Project views are reported, not created, in the first version.

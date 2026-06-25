@@ -5,6 +5,7 @@ import {
   DEFAULT_LABEL_DEFINITIONS,
   buildCanonicalLabelDefinitions,
   createGitHubBootstrapReport,
+  inspectProjectFields,
 } from "../scripts/lib/github-init.mjs";
 
 function makeConfig() {
@@ -24,6 +25,9 @@ function makeConfig() {
       requiredFields: [
         { name: "Execution Stage", type: "single-select", values: ["Inbox", "Done"] },
         { name: "Dispatch ID", type: "text", values: [] },
+      ],
+      optionalFields: [
+        { name: "Review Capacity Cost", type: "number", values: [] },
       ],
       recommendedViews: ["Intake", "Validation"],
     },
@@ -104,17 +108,91 @@ test("label color and description mismatches are reported as Tracker Drift witho
   assert.doesNotMatch(report.text, /would create: needs-triage/);
 });
 
-test("project fields and views remain report-only in bootstrap output", async () => {
+test("project field inspection plans missing configured fields while views remain report-only", async () => {
   const config = makeConfig();
   const report = await createGitHubBootstrapReport(config, {
     existingLabels: buildCanonicalLabelDefinitions(config),
+    existingProjectFields: [
+      { name: "Execution Stage", type: "ProjectV2SingleSelectField", options: [{ name: "Inbox" }, { name: "Done" }] },
+    ],
   });
 
   assert.match(report.text, /## Required Project Fields/);
   assert.match(report.text, /Execution Stage: Inbox, Done/);
   assert.match(report.text, /Dispatch ID: text/);
+  assert.match(report.text, /## Project Field Inspection/);
+  assert.match(report.text, /present: Execution Stage/);
+  assert.match(report.text, /missing: Dispatch ID \(TEXT\)/);
+  assert.match(report.text, /missing: Review Capacity Cost \(NUMBER\)/);
+  assert.match(report.text, /would create with --create-project-fields: Dispatch ID/);
+  assert.match(report.text, /would create with --create-project-fields: Review Capacity Cost/);
   assert.match(report.text, /## Recommended Project Views/);
   assert.match(report.text, /- Intake/);
   assert.match(report.text, /- Validation/);
-  assert.match(report.text, /Project fields and views are report-only in this bootstrap module/);
+  assert.match(report.text, /Project views are still report-only because the GitHub CLI does not expose view creation/);
+});
+
+test("apply mode creates missing Project fields only with the explicit project-field flag", async () => {
+  const config = makeConfig();
+  const projectCalls = [];
+  const report = await createGitHubBootstrapReport(config, {
+    apply: true,
+    createProjectFields: true,
+    existingLabels: buildCanonicalLabelDefinitions(config),
+    existingProjectFields: [
+      { name: "Execution Stage", type: "ProjectV2SingleSelectField", options: [{ name: "Inbox" }, { name: "Done" }] },
+    ],
+    projectFieldRunner: async (command, args, field) => {
+      projectCalls.push({ command, args, field });
+      return { code: 0, stdout: `created ${field.name}`, stderr: "" };
+    },
+  });
+
+  assert.deepEqual(
+    projectCalls.map((call) => call.field.name),
+    ["Dispatch ID", "Review Capacity Cost"],
+  );
+  assert.deepEqual(projectCalls[0].args, [
+    "project",
+    "field-create",
+    "7",
+    "--owner",
+    "example",
+    "--name",
+    "Dispatch ID",
+    "--data-type",
+    "TEXT",
+    "--format",
+    "json",
+  ]);
+  assert.deepEqual(projectCalls[1].args, [
+    "project",
+    "field-create",
+    "7",
+    "--owner",
+    "example",
+    "--name",
+    "Review Capacity Cost",
+    "--data-type",
+    "NUMBER",
+    "--format",
+    "json",
+  ]);
+  assert.match(report.text, /Project Field Apply Results/);
+  assert.match(report.text, /created: Dispatch ID/);
+  assert.match(report.text, /created: Review Capacity Cost/);
+});
+
+test("Project field drift is reported instead of mutated", () => {
+  const config = makeConfig();
+  const inspection = inspectProjectFields(config.projectSchema.requiredFields, [
+    { name: "Execution Stage", type: "ProjectV2SingleSelectField", options: [{ name: "Inbox" }, { name: "Ready" }] },
+    { name: "Dispatch ID", type: "ProjectV2Field" },
+  ]);
+
+  assert.equal(inspection[0].status, "drift");
+  assert.equal(inspection[0].drift[0].field, "options");
+  assert.match(inspection[0].drift[0].expected, /Inbox, Done/);
+  assert.match(inspection[0].drift[0].actual, /Inbox, Ready/);
+  assert.equal(inspection[1].status, "present");
 });

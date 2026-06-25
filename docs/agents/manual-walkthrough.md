@@ -8,8 +8,8 @@ Use the command shapes below exactly, then replace the example issue, PR, title,
 
 - Configure `.ai/ops.config.json` with the intended GitHub owner, repo, and Project reference.
 - Install and authenticate `gh` before any GitHub-backed step.
-- Create the GitHub Project manually in this version and keep its required fields aligned with `docs/agents/board.md`: `Execution Stage`, `Execution Lane`, `Queue Class`, `Risk`, `Dependency`, `Conflict Surface`, `Feature Track`, and `Dispatch ID`.
-- Treat `pnpm ops github:init` as a bootstrap and drift report. Even with `-- --apply`, validated behavior is missing-label creation only; it does not create Projects, fields, or views.
+- Create or connect the GitHub Project manually in this version and keep its fields aligned with `docs/agents/board.md`.
+- Treat `pnpm ops github:init` as a bootstrap and drift report. With `-- --apply`, it creates missing labels; with `-- --apply --create-project-fields`, it also creates missing configured Project fields. It does not create Projects or views.
 
 ## Choose Your Entry Path
 

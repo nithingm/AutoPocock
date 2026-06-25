@@ -59,6 +59,7 @@ The Umbrella CLI stages the workflow:
 - `pnpm ops schedule -- --queue .ai/queue.json --apply`: update GitHub Project fields for selected `DISPATCH` decisions without creating dispatch artifacts
 - `pnpm ops schedule -- --queue .ai/queue.example.json --dispatch`: create dispatch artifacts for `DISPATCH` decisions in the generated Scheduler Plan
 - `pnpm ops github:init`: print a dry-run GitHub Tracker Bootstrap report
+- `pnpm ops github:init -- --apply --create-project-fields`: create missing configured GitHub Project fields after inspecting existing fields and reporting drift
 - `pnpm ops github:export`: export non-`Done` GitHub Project issues into `.ai/queue.json`
 - `pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json`: validate a claimed dispatch without invoking a provider
 - `pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --prepare-worktree`: prepare the local worktree directory for a claimed worktree dispatch, then print the Runner Plan
@@ -75,8 +76,8 @@ GitHub-backed flow depends on a real project configuration, not just local files
 - `pnpm ops setup` is the top-level readiness check for local structure, host environment, provider availability, and GitHub config/auth state.
 - `.ai/ops.config.json` must contain the intended GitHub owner, repo, and Project reference.
 - `gh` must be installed and authenticated before `pnpm ops github:init`, `pnpm ops github:export`, `pnpm ops schedule -- --apply`, `pnpm ops mirror -- --apply`, or `pnpm ops feedback -- --apply`.
-- `pnpm ops github:init` is a bootstrap report by default. With `-- --apply`, validated behavior is limited to creating missing canonical labels.
-- GitHub Project creation, field creation, and view creation are still manual in this version.
+- `pnpm ops github:init` is a bootstrap report by default. With `-- --apply`, it creates missing canonical labels. Add `--create-project-fields` to create missing configured Project fields.
+- GitHub Project creation and view creation are still manual in this version.
 - `pnpm ops board` prints the board contract only. It does not verify live GitHub schema drift.
 
 The required GitHub Project fields for the manual OS are:

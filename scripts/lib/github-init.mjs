@@ -121,6 +121,114 @@ export function planLabelCreateCommands(labelInspection) {
     }));
 }
 
+function configuredProjectFields(config) {
+  return [
+    ...(config.projectSchema?.requiredFields || []),
+    ...(config.projectSchema?.optionalFields || []),
+  ];
+}
+
+function normalizeProjectFieldType(type) {
+  const normalized = String(type || "text").trim().toLowerCase();
+  if (normalized === "single-select" || normalized === "single_select" || normalized === "single select") {
+    return "SINGLE_SELECT";
+  }
+  if (normalized === "number") {
+    return "NUMBER";
+  }
+  if (normalized === "date") {
+    return "DATE";
+  }
+  return "TEXT";
+}
+
+function normalizeExistingProjectField(field) {
+  if (!field) {
+    return null;
+  }
+
+  return {
+    name: field.name || "",
+    type: field.type || "",
+    options: Array.isArray(field.options) ? field.options.map((option) => option.name || option).filter(Boolean) : [],
+  };
+}
+
+export function inspectProjectFields(configuredFields, existingFields = []) {
+  const existingByName = new Map(
+    (existingFields || [])
+      .map(normalizeExistingProjectField)
+      .filter(Boolean)
+      .map((field) => [field.name.toLowerCase(), field]),
+  );
+
+  return configuredFields.map((field) => {
+    const expectedType = normalizeProjectFieldType(field.type);
+    const expectedOptions = expectedType === "SINGLE_SELECT" ? [...(field.values || [])] : [];
+    const existing = existingByName.get(String(field.name || "").toLowerCase());
+
+    if (!existing) {
+      return {
+        ...field,
+        dataType: expectedType,
+        status: "missing",
+        drift: [],
+      };
+    }
+
+    const drift = [];
+    if (expectedType === "SINGLE_SELECT") {
+      const missingOptions = expectedOptions.filter((option) => !existing.options.includes(option));
+      const extraOptions = existing.options.filter((option) => !expectedOptions.includes(option));
+      if (missingOptions.length > 0 || extraOptions.length > 0) {
+        drift.push({
+          field: "options",
+          expected: expectedOptions.join(", "),
+          actual: existing.options.join(", "),
+        });
+      }
+    }
+
+    return {
+      ...field,
+      dataType: expectedType,
+      status: drift.length > 0 ? "drift" : "present",
+      actual: existing,
+      drift,
+    };
+  });
+}
+
+export function planProjectFieldCreateCommands(projectFieldInspection, { projectNumber = "", owner = "" } = {}) {
+  return projectFieldInspection
+    .filter((field) => field.status === "missing")
+    .map((field) => {
+      const args = [
+        "project",
+        "field-create",
+        String(projectNumber),
+        "--owner",
+        owner,
+        "--name",
+        field.name,
+        "--data-type",
+        field.dataType,
+        "--format",
+        "json",
+      ];
+
+      if (field.dataType === "SINGLE_SELECT") {
+        args.push("--single-select-options", (field.values || []).join(","));
+      }
+
+      return {
+        command: "gh",
+        args,
+        field,
+      };
+    });
+}
+
 function formatMismatch(mismatch) {
   return `${mismatch.field} expected "${mismatch.expected}" actual "${mismatch.actual}"`;
 }
@@ -132,9 +240,13 @@ export function renderGitHubBootstrapReport({
   labelInspection = [],
   templatePresent = false,
   projectFields = [],
+  projectFieldInspection = [],
   projectViews = [],
   createCommands = [],
+  projectFieldCreateCommands = [],
   applyResults = [],
+  projectFieldApplyResults = [],
+  createProjectFields = false,
 }) {
   const lines = [
     "# GitHub Tracker Bootstrap",
@@ -144,8 +256,8 @@ export function renderGitHubBootstrapReport({
   ];
 
   if (mode === "apply") {
-    lines.push("Only missing canonical labels were eligible for creation.");
-    lines.push("Existing labels were left untouched, including any drift.");
+    lines.push("Only missing canonical labels and explicitly requested missing Project fields were eligible for creation.");
+    lines.push("Existing labels and Project fields were left untouched, including any drift.");
   } else {
     lines.push("No GitHub labels, issues, projects, fields, or comments were created or modified.");
   }
@@ -228,13 +340,59 @@ export function renderGitHubBootstrapReport({
     lines.push(`- ${field.name}: ${values}`);
   }
 
+  lines.push("", "## Project Field Inspection", "");
+  if (projectFieldInspection.length === 0) {
+    lines.push("- Status: unavailable");
+  } else {
+    for (const field of projectFieldInspection) {
+      if (field.status === "missing") {
+        lines.push(`- missing: ${field.name} (${field.dataType})`);
+        continue;
+      }
+
+      if (field.status === "drift") {
+        lines.push(`- Project Drift: ${field.name} (${field.drift.map(formatMismatch).join("; ")})`);
+        continue;
+      }
+
+      lines.push(`- present: ${field.name}`);
+    }
+  }
+
+  lines.push("", "## Planned Project Field Changes", "");
+  if (projectFieldCreateCommands.length === 0) {
+    lines.push("- None");
+  } else if (!createProjectFields) {
+    for (const planned of projectFieldCreateCommands) {
+      lines.push(`- would create with --create-project-fields: ${planned.field.name}`);
+    }
+  } else {
+    for (const planned of projectFieldCreateCommands) {
+      lines.push(`- would create: ${planned.field.name}`);
+    }
+  }
+
+  if (mode === "apply") {
+    lines.push("", "## Project Field Apply Results", "");
+    if (!createProjectFields) {
+      lines.push("- Skipped. Add `--create-project-fields` to create missing Project fields.");
+    } else if (projectFieldApplyResults.length === 0) {
+      lines.push("- No Project fields were created.");
+    } else {
+      for (const result of projectFieldApplyResults) {
+        lines.push(`- created: ${result.field.name}`);
+      }
+    }
+  }
+
   lines.push("", "## Recommended Project Views", "");
   for (const view of projectViews) {
     lines.push(`- ${view}`);
   }
 
   lines.push("", "## Notes", "");
-  lines.push("- Project fields and views are report-only in this bootstrap module.");
+  lines.push("- Project fields are dry-run-first and are created only with `--apply --create-project-fields`.");
+  lines.push("- Project views are still report-only because the GitHub CLI does not expose view creation.");
   lines.push("- Tracker Drift is reported for canonical label mismatches and never auto-corrected.");
 
   return `${lines.join("\n")}\n`;
@@ -256,19 +414,54 @@ export async function applyMissingCanonicalLabels(labelInspection, options = {})
   return results;
 }
 
+export async function applyMissingProjectFields(projectFieldInspection, options = {}) {
+  const runner = options.projectFieldRunner || options.runner || (async () => ({ code: 0, stdout: "", stderr: "" }));
+  const planned = planProjectFieldCreateCommands(projectFieldInspection, options);
+  const results = [];
+
+  for (const plannedCommand of planned) {
+    const execution = await runner(plannedCommand.command, plannedCommand.args, plannedCommand.field);
+    results.push({
+      ...plannedCommand,
+      execution,
+    });
+  }
+
+  return results;
+}
+
 export async function createGitHubBootstrapReport(config, options = {}) {
   const canonicalLabels = buildCanonicalLabelDefinitions(config, options);
   const labelInspection = inspectCanonicalLabels(canonicalLabels, options.existingLabels || []);
   const createCommands = planLabelCreateCommands(labelInspection);
+  const allProjectFields = configuredProjectFields(config);
+  const hasProjectFieldInspection = Object.hasOwn(options, "existingProjectFields");
+  const projectFieldInspection = hasProjectFieldInspection ? inspectProjectFields(allProjectFields, options.existingProjectFields || []) : [];
+  const projectFieldCreateCommands = hasProjectFieldInspection
+    ? planProjectFieldCreateCommands(projectFieldInspection, {
+        projectNumber: options.repository?.projectNumber || config.github?.projectNumber || "",
+        owner: options.repository?.owner || config.github?.owner || "",
+      })
+    : [];
   const mode = options.apply ? "apply" : "dry-run";
   const applyResults = options.apply ? await applyMissingCanonicalLabels(labelInspection, options) : [];
+  const projectFieldApplyResults = options.apply && options.createProjectFields
+    ? await applyMissingProjectFields(projectFieldInspection, {
+        ...options,
+        projectNumber: options.repository?.projectNumber || config.github?.projectNumber || "",
+        owner: options.repository?.owner || config.github?.owner || "",
+      })
+    : [];
 
   return {
     mode,
     canonicalLabels,
     labelInspection,
     createCommands,
+    projectFieldInspection,
+    projectFieldCreateCommands,
     applyResults,
+    projectFieldApplyResults,
     text: renderGitHubBootstrapReport({
       mode,
       gh: options.gh,
@@ -282,9 +475,13 @@ export async function createGitHubBootstrapReport(config, options = {}) {
       labelInspection,
       templatePresent: Boolean(options.templatePresent),
       projectFields: config.projectSchema?.requiredFields || [],
+      projectFieldInspection,
       projectViews: config.projectSchema?.recommendedViews || [],
       createCommands,
+      projectFieldCreateCommands,
       applyResults,
+      projectFieldApplyResults,
+      createProjectFields: Boolean(options.createProjectFields),
     }),
   };
 }
