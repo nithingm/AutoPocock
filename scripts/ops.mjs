@@ -128,6 +128,7 @@ Usage:
   pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --prepare-docker
   pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --execute --execute-docker
   pnpm ops docker:validate -- --image node:22-bookworm --provider codex --require-command node,pnpm,git --docker-env CODEX_HOME
+  pnpm ops docker:build-provider -- --tag autopocock-provider-runner:local --validate
   pnpm ops docker:clean -- --max-age-hours 24
   pnpm ops dispatch -- --issue 123 --title "Docker slice" --source manual --override-reason "Solo Operator approved" --isolation-mode docker --docker-env CODEX_HOME --docker-volume codex-cache:/codex-cache
   pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --execute
@@ -365,6 +366,46 @@ function dockerValidationPlan({ image, provider = "", commands = [], env = [], v
     envAllowlist,
     extraVolumes,
     network: network || "none",
+    args,
+    rendered_command: ["docker", ...args].join(" "),
+  };
+}
+
+function defaultProviderImageBuildArgs() {
+  return {
+    dockerfile: path.join("docker", "provider-runner", "Dockerfile"),
+    tag: "autopocock-provider-runner:local",
+    codexVersion: "0.142.2",
+    claudeCodeVersion: "2.1.193",
+    pnpmVersion: "10.13.1",
+  };
+}
+
+function dockerProviderImageValidationPlan(image) {
+  const commands = ["node", "pnpm", "git", "codex", "claude"];
+  const script = [
+    dockerValidationScript({ commands }),
+    "node --version >/dev/null",
+    "pnpm --version >/dev/null",
+    "git --version >/dev/null",
+    "codex --version >/dev/null",
+    "claude --version >/dev/null",
+  ].join(" && ");
+  const args = [
+    "run",
+    "--rm",
+    "--network",
+    "none",
+    image,
+    "sh",
+    "-lc",
+    script,
+  ];
+
+  return {
+    image,
+    requiredCommands: commands,
+    network: "none",
     args,
     rendered_command: ["docker", ...args].join(" "),
   };
@@ -3436,6 +3477,95 @@ async function dockerValidate(args) {
   process.stdout.write(`${lines.join("\n")}\n`);
 }
 
+async function dockerBuildProvider(args) {
+  const defaults = defaultProviderImageBuildArgs();
+  const dockerfile = readOption(args, "dockerfile", defaults.dockerfile);
+  const tag = readOption(args, "tag", defaults.tag);
+  const codexVersion = readOption(args, "codex-version", defaults.codexVersion);
+  const claudeCodeVersion = readOption(args, "claude-code-version", defaults.claudeCodeVersion);
+  const pnpmVersion = readOption(args, "pnpm-version", defaults.pnpmVersion);
+  const validate = args.includes("--validate");
+  const dockerReadiness = await commandAvailable("docker");
+
+  if (!dockerReadiness.available) {
+    throw new Error(`docker:build-provider requires Docker CLI. ${dockerReadiness.stderr || "Docker was not found."}`);
+  }
+
+  const dockerfilePath = path.isAbsolute(dockerfile) ? dockerfile : path.join(cwd, dockerfile);
+  if (!(await pathExists(dockerfilePath))) {
+    throw new Error(`docker:build-provider Dockerfile not found: ${dockerfile}`);
+  }
+
+  const buildArgs = [
+    "build",
+    "-f",
+    dockerfile,
+    "-t",
+    tag,
+    "--build-arg",
+    `CODEX_VERSION=${codexVersion}`,
+    "--build-arg",
+    `CLAUDE_CODE_VERSION=${claudeCodeVersion}`,
+    "--build-arg",
+    `PNPM_VERSION=${pnpmVersion}`,
+    ".",
+  ];
+  const build = await runCommand(dockerReadiness.command || "docker", buildArgs, {
+    cwd,
+    maxBuffer: 1024 * 1024 * 20,
+  });
+
+  let validation = null;
+  if (validate) {
+    const plan = dockerProviderImageValidationPlan(tag);
+    const execution = await runCommand(dockerReadiness.command || "docker", plan.args, {
+      cwd,
+      maxBuffer: 1024 * 1024 * 10,
+    });
+    validation = {
+      plan,
+      execution,
+    };
+  }
+
+  const lines = [
+    "# Docker Provider Image Build",
+    "",
+    `Dockerfile: ${dockerfile}`,
+    `Image tag: ${tag}`,
+    `Codex CLI version: ${codexVersion}`,
+    `Claude Code version: ${claudeCodeVersion}`,
+    `pnpm version: ${pnpmVersion}`,
+    `Build command: docker ${buildArgs.join(" ")}`,
+    `Build status: passed`,
+  ];
+
+  if (build.stdout) {
+    lines.push("", "## Build stdout", "", build.stdout.trim());
+  }
+  if (build.stderr) {
+    lines.push("", "## Build stderr", "", build.stderr.trim());
+  }
+  if (validation) {
+    lines.push(
+      "",
+      "## Validation",
+      "",
+      `Docker command: ${validation.plan.rendered_command}`,
+      `Required commands: ${validation.plan.requiredCommands.join(", ")}`,
+      "Status: passed",
+    );
+    if (validation.execution.stdout) {
+      lines.push("", "### Probe stdout", "", validation.execution.stdout.trim());
+    }
+    if (validation.execution.stderr) {
+      lines.push("", "### Probe stderr", "", validation.execution.stderr.trim());
+    }
+  }
+
+  process.stdout.write(`${lines.join("\n")}\n`);
+}
+
 function parseDockerInspectOutput(stdout) {
   const text = String(stdout || "").trim();
   if (!text) {
@@ -4671,6 +4801,11 @@ async function main() {
 
   if (command === "docker:validate") {
     await dockerValidate(args);
+    return;
+  }
+
+  if (command === "docker:build-provider") {
+    await dockerBuildProvider(args);
     return;
   }
 

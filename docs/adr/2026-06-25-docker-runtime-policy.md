@@ -27,3 +27,5 @@ Docker execution is explicit and inspectable:
 - Additional writable state is visible in dispatch JSON, Provider Run metadata, and the rendered command.
 - Production teams can bring hardened images and named volumes without changing the runner contract.
 - `pnpm ops docker:validate` checks proposed execution images with no network, validates required provider commands, and verifies explicitly allowed credential env vars are present before live Docker dispatch use.
+- `docker/provider-runner/Dockerfile` is the default repo-owned provider image for local validation. It installs pinned `pnpm`, Codex CLI, and Claude Code versions, creates a non-root `runner` user, and keeps Codex/Claude cache directories explicit.
+- `pnpm ops docker:build-provider -- --tag autopocock-provider-runner:local --validate` builds that image and verifies `node`, `pnpm`, `git`, `codex`, and `claude` command/version readiness with Docker networking disabled.

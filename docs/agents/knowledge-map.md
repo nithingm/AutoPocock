@@ -107,7 +107,7 @@ pnpm smoke:console
 Observed:
 
 - `pnpm verify:project -- --strict-external` passes for local readiness, Project read path, Project write scope, and issue `#45` closed terminal state
-- local setup reports git, node, pnpm, GitHub CLI/auth, Codex provider, and workflow directories ready; Claude Code is available through the provider registry for explicit `--provider claude` live runs
+- local setup reports git, node, pnpm, GitHub CLI/auth, Codex provider readiness, Claude provider readiness, and workflow directories ready
 - `github:init -- --apply --create-project` is now a guarded fresh-setup path that refuses duplicate Project creation when a Project reference exists
 - `github:init -- --apply --create-project-fields` created the missing configured optional Project fields, while continuing to report existing drift without rewriting fields
 - `run -- --prepare-docker` exposes Docker image/workspace/network/env/volume isolation plans, and `run -- --execute --execute-docker` launches the rendered container command after explicit approval
@@ -137,7 +137,7 @@ The core landing and tracker reconciliation are complete. Remaining work is prod
 
 1. GitHub Project views are now inspected and drift-reported through GraphQL; creation and renaming remain manual because GitHub CLI/GraphQL do not expose ProjectV2 view mutations.
 2. Distributed claim locking now has a GitHub ref CAS path, scheduler dispatch policy, `claim-locks` text/JSON audit plus orphan cleanup, scheduled GitHub Actions audit, and an Actions run-summary dashboard; remaining deployment work is external operator dashboards only if needed.
-3. Run `pnpm ops docker:validate` against the concrete hardened Docker images and provider credential packages chosen for deployment.
+3. Build and validate the default provider image with `pnpm ops docker:build-provider -- --tag autopocock-provider-runner:local --validate`; use `pnpm ops docker:validate` for any alternate deployment image or credential package.
 4. Re-run full local tests plus strict live tracker verification after any follow-up updates.
 
 ## Continuation Brief

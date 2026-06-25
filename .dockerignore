@@ -1,0 +1,7 @@
+.git
+.ai
+.worktrees
+node_modules
+docs/QA/*.generated.md
+npm-debug.log*
+pnpm-debug.log*

@@ -87,6 +87,7 @@ async function installFakeDocker(cwd) {
     `#!/usr/bin/env sh
 if [ "$1" = "--version" ]; then echo "Docker version 99.0.0"; exit 0; fi
 printf '%s\\n' "$*" >> "$DOCKER_LOG"
+if [ "$1" = "build" ]; then echo "docker image built"; exit 0; fi
 if [ "$1" = "container" ] && [ "$2" = "ls" ]; then printf '%s\\n' "$DOCKER_CONTAINER_LS_OUTPUT"; exit 0; fi
 if [ "$1" = "container" ] && [ "$2" = "inspect" ]; then printf '%s\\n' "$DOCKER_INSPECT_OUTPUT"; exit 0; fi
 if [ "$1" = "container" ] && [ "$2" = "rm" ]; then shift 2; printf 'removed %s\\n' "$*"; exit 0; fi
@@ -104,6 +105,10 @@ if "%1"=="--version" (
   exit /b 0
 )
 echo %*>>"%DOCKER_LOG%"
+if "%1"=="build" (
+  echo docker image built
+  exit /b 0
+)
 if "%1"=="container" if "%2"=="ls" (
   echo %DOCKER_CONTAINER_LS_OUTPUT%
   exit /b 0
@@ -211,6 +216,44 @@ test("docker:validate fails when the image readiness probe fails", async () => {
   assert.notEqual(result.code, 0);
   assert.match(result.stderr, /Docker image validation failed/);
   assert.match(result.stderr, /missing command/);
+});
+
+test("docker:build-provider builds the pinned provider image and validates provider commands", async () => {
+  const cwd = await makeWorkspace();
+  const fakeDocker = await installFakeDocker(cwd);
+  await mkdir(path.join(cwd, "docker", "provider-runner"), { recursive: true });
+  await writeFile(path.join(cwd, "docker", "provider-runner", "Dockerfile"), "FROM node:22-bookworm\n");
+
+  const result = await runOps(cwd, [
+    "docker:build-provider",
+    "--tag",
+    "autopocock-provider-runner:test",
+    "--codex-version",
+    "0.142.2",
+    "--claude-code-version",
+    "2.1.193",
+    "--validate",
+  ], {
+    env: fakeDocker.env,
+  });
+  const dockerLog = await readFile(fakeDocker.logPath, "utf8");
+
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /# Docker Provider Image Build/);
+  assert.match(result.stdout, /Image tag: autopocock-provider-runner:test/);
+  assert.match(result.stdout, /Codex CLI version: 0\.142\.2/);
+  assert.match(result.stdout, /Claude Code version: 2\.1\.193/);
+  assert.match(result.stdout, /Build status: passed/);
+  assert.match(result.stdout, /Required commands: node, pnpm, git, codex, claude/);
+  assert.match(dockerLog, /build -f docker[\\/]provider-runner[\\/]Dockerfile -t autopocock-provider-runner:test/);
+  assert.match(dockerLog, /--build-arg CODEX_VERSION=0\.142\.2/);
+  assert.match(dockerLog, /--build-arg CLAUDE_CODE_VERSION=2\.1\.193/);
+  assert.match(dockerLog, /run --rm --network none autopocock-provider-runner:test sh -lc/);
+  assert.match(dockerLog, /command -v codex/);
+  assert.match(dockerLog, /command -v claude/);
+  assert.match(dockerLog, /pnpm --version/);
+  assert.match(dockerLog, /codex --version/);
+  assert.match(dockerLog, /claude --version/);
 });
 
 test("github:export refuses to run without a project reference", async () => {
