@@ -50,7 +50,7 @@ pnpm smoke:console
 Observed result:
 
 - `verify:project -- --strict-external` reports local readiness passed, GitHub Project read path passed, Project write scope present, and issue `#45` in a closed terminal state outside the active queue.
-- `setup` reports git, node, pnpm, GitHub CLI/auth, Codex provider, and workflow directories ready. Claude Code is supported by the provider registry for live runs with `--provider claude`; setup still uses Codex as the default provider readiness check.
+- `setup` reports git, node, pnpm, GitHub CLI/auth, Codex provider readiness, Claude provider readiness, and workflow directories ready.
 - `gh auth status` reports account `nithingm` with Project access sufficient for the strict verifier.
 - `github:init` remains dry-run-first and reports existing label and Project field drift without mutating GitHub. The guarded `--apply --create-project` path now creates a fresh Project only when no Project reference is configured, and the explicit `--apply --create-project-fields` path created the missing configured optional Project fields on Project 1.
 - `github:init -- --write-view-plan` writes a Prepared Human Step for exact Project view workarounds. The latest live artifact reports all recommended views present except the existing leading-space name drift ` Validation` -> `Validation`, which still requires a manual UI rename because ProjectV2 view mutations are unavailable.

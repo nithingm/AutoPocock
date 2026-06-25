@@ -1,5 +1,5 @@
 import path from "node:path";
-import { getProvider } from "./providers/index.mjs";
+import { getProvider, listCanonicalProviderNames } from "./providers/index.mjs";
 import {
   INIT_STRUCTURE_DIRS,
   detectHostEnvironment,
@@ -45,7 +45,7 @@ export async function inspectSetupPlane({
   ]);
 
   const providers = [];
-  for (const providerName of ["codex"]) {
+  for (const providerName of listCanonicalProviderNames()) {
     const provider = getProvider(providerName, { commandAvailable: (cmd, args) => commandAvailable(cmd, args, { cwd, env }), cwd });
     const availability = await provider.isAvailable({ requireLogin: true });
     providers.push({

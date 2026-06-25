@@ -304,6 +304,8 @@ test("setup reports one cross-platform readiness flow without mutating the works
   assert.match(result.stdout, /## Runtime Prerequisites/);
   assert.match(result.stdout, /## GitHub Readiness/);
   assert.match(result.stdout, /## Providers/);
+  assert.match(result.stdout, /- codex: /);
+  assert.match(result.stdout, /- claude: /);
   assert.match(result.stdout, /## Workflow Structure/);
   assert.match(result.stdout, /would create local directory docs\/PRDs|would create local directory docs\\PRDs/);
   await assert.rejects(stat(path.join(cwd, "docs", "PRDs")));
