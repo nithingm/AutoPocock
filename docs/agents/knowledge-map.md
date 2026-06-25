@@ -9,7 +9,7 @@ This is the operator-facing map of where the project's knowledge lives and how t
 
 AutoPocock is no longer just a manual repo template. The accepted manual operating system is present, documented, and test-backed in the current working tree. On top of that, the local tree now contains a broader provider/DAG/Ralph orchestration layer with test coverage.
 
-The automation layer is now landed on `origin/main` through PR `#56`, with a follow-up memory proposal decision/apply flow added on `main`. It is committed, CI-backed, and reconciled in GitHub Issues and Project fields.
+The automation layer is now landed on `origin/main` through PR `#56`, with follow-up memory proposal decision/apply, mirror update, scheduler conflict inference, and Claude Code provider adapter work added on `main`. It is committed, CI-backed, and reconciled in GitHub Issues and Project fields.
 
 ## Read These First
 
@@ -75,7 +75,7 @@ The current local implementation is organized around these planes:
 - Issue/DAG planning: compiles approved PRDs into issue DAGs with node metadata, dependencies, execution waves, quality gates, and regeneration support.
 - GitHub bridge: initializes tracker labels, exports project queue state, mirrors selected artifacts, and reconciles DAG work with GitHub issue/project state.
 - Scheduler and dispatch: creates scheduler plans, dispatch artifacts, claims, reclaim decisions, and runner-ready execution packages.
-- Provider execution: validates claimed dispatches, prepares worktrees, runs provider-neutral loop specs through provider adapters, and records provider run evidence.
+- Provider execution: validates claimed dispatches, prepares worktrees, runs provider-neutral loop specs through Codex or Claude Code provider adapters, and records provider run evidence.
 - Ralph/graph progression: models wave approval, pause/freeze policy, bug-loop repair insertion, QA/review decisions, and dependency unlocking.
 - Review and QA: enforces Review Entry Gate, targeted QA, QA decisions, Same-PR Fix classification, and bug follow-up creation.
 - Workflow console: exposes setup, context, PRD, graph, execution, and review state through an artifact-first local UI.
@@ -90,7 +90,7 @@ pnpm test
 
 Observed:
 
-- 197 tests passed
+- 202 tests passed
 - 0 tests failed
 
 Latest readiness checks recorded there:
@@ -107,7 +107,7 @@ pnpm smoke:console
 Observed:
 
 - `pnpm verify:project -- --strict-external` passes for local readiness, Project read path, Project write scope, and issue `#45` closed terminal state
-- local setup reports git, node, pnpm, GitHub CLI/auth, Codex provider, and workflow directories ready
+- local setup reports git, node, pnpm, GitHub CLI/auth, Codex provider, and workflow directories ready; Claude Code is available through the provider registry for explicit `--provider claude` live runs
 - GitHub auth is live for account `nithingm` and has sufficient Project access for the strict verifier
 - GitHub bootstrap remains dry-run-first and reports drift instead of destructive mutation
 - issue `#45` is confirmed closed and absent from the active non-Done Project export after issues `#44` through `#55` were closed and reconciled
@@ -125,10 +125,14 @@ Observed:
 
 ## Optional Follow-Up
 
-The core landing and tracker reconciliation are complete. Remaining work is optional cleanup:
+The core landing and tracker reconciliation are complete. Remaining work is product hardening beyond the current local prototype:
 
-1. Decide whether intentionally unstaged scratch/demo artifacts should be deleted, ignored, or promoted separately.
-2. Re-run full local tests plus strict live tracker verification after any follow-up updates.
+1. Automate GitHub Project creation, fields, and views beyond report-first bootstrap.
+2. Define worktree retention and cleanup policy.
+3. Add Docker runner isolation before high-concurrency AFK execution.
+4. Extend dispatch claim locking beyond local filesystem coordination for distributed runners.
+5. Decide whether approved repo-local memory decisions should sync into external/user-level memory stores.
+6. Re-run full local tests plus strict live tracker verification after any follow-up updates.
 
 ## Continuation Brief
 

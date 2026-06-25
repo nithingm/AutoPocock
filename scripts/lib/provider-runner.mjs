@@ -470,6 +470,7 @@ export function executeCodexStub({ bundle, stubResult = "success" }) {
   if (!supported.has(stubResult)) {
     throw new Error(`Unsupported stub result: ${stubResult}. Use success or blocked.`);
   }
+  const providerLabel = displayProviderName(bundle.provider);
 
   const sharedVerification = [
     `Loaded claimed dispatch ${bundle.dispatch_id}.`,
@@ -481,20 +482,20 @@ export function executeCodexStub({ bundle, stubResult = "success" }) {
   if (stubResult === "blocked") {
     return {
       status: "blocked",
-      summary: "Provider execution blocked after bundle assembly. The Codex adapter boundary exists, but this run remained stub-backed and did not apply code changes.",
+      summary: `Provider execution blocked after bundle assembly. The ${providerLabel} run remained stub-backed and did not apply code changes.`,
       changedAreas: ["None"],
       verificationCommands: ["pnpm ops run -- --dispatch <dispatch> --execute --stub-result blocked"],
       verificationResults: sharedVerification.concat("Persisted blocked Provider Run metadata and wrote a blocked Completion Report."),
       gaps: [
-        "No live Codex provider invocation occurred.",
+        `No live ${providerLabel} provider invocation occurred.`,
         "No code changes were applied from the execution boundary.",
       ],
       risks: [
-        "Provider execution is still stub-backed.",
-        "A live Codex adapter is still required before AFK code execution is real.",
+        "This execution record proves the stub boundary only.",
+        "A live provider run is still required before claiming real AFK code execution evidence.",
       ],
       followUps: [
-        "Implement a live Codex adapter behind the provider contract.",
+        "Retry with `--live-provider` when real provider execution is required.",
       ],
       artifactsUpdated: ["Provider Run metadata", "Completion Report"],
     };
@@ -502,7 +503,7 @@ export function executeCodexStub({ bundle, stubResult = "success" }) {
 
   return {
     status: "needs human review",
-    summary: "Provider execution path succeeded through the Codex stub boundary. The runner loaded the claimed dispatch and handoff, assembled a provider-neutral bundle, persisted Provider Run metadata, and wrote a real Completion Report.",
+    summary: `Provider execution path succeeded through the ${providerLabel} stub boundary. The runner loaded the claimed dispatch and handoff, assembled a provider-neutral bundle, persisted Provider Run metadata, and wrote a real Completion Report.`,
     changedAreas: [
       "docs/agents/completions",
       ".ai/provider-runs",
@@ -510,17 +511,28 @@ export function executeCodexStub({ bundle, stubResult = "success" }) {
     verificationCommands: ["pnpm ops run -- --dispatch <dispatch> --execute"],
     verificationResults: sharedVerification.concat("Persisted successful Provider Run metadata and wrote a Completion Report."),
     gaps: [
-      "No live Codex provider invocation occurred.",
+      `No live ${providerLabel} provider invocation occurred.`,
       "No implementation changes were applied beyond execution artifacts.",
     ],
     risks: [
-      "The execution boundary is still stub-backed.",
+      "This execution record proves the stub boundary only.",
     ],
     followUps: [
-      "Replace the stub boundary with a live Codex adapter.",
+      "Retry with `--live-provider` when real provider execution is required.",
     ],
     artifactsUpdated: ["Provider Run metadata", "Completion Report"],
   };
+}
+
+function displayProviderName(provider) {
+  const normalized = String(provider || "provider").toLowerCase();
+  if (normalized === "codex") {
+    return "Codex";
+  }
+  if (normalized === "claude" || normalized === "claude-code") {
+    return "Claude";
+  }
+  return String(provider || "provider");
 }
 
 export function renderExecutionCompletionReport({
@@ -573,15 +585,15 @@ export function renderExecutionCompletionReport({
 `;
 }
 
-export function parseCodexFinalMessage(message) {
+export function parseProviderFinalMessage(message, { providerName = "Provider" } = {}) {
   const text = normalizeText(message);
   if (!text) {
     return {
       status: "blocked",
-      summary: "Codex returned no final message.",
-      verification: ["No final message captured from Codex."],
-      followUps: ["Inspect the Provider Run metadata and Codex stdout/stderr."],
-      gaps: ["Codex final message was empty."],
+      summary: `${providerName} returned no final message.`,
+      verification: [`No final message captured from ${providerName}.`],
+      followUps: [`Inspect the Provider Run metadata and ${providerName} stdout/stderr.`],
+      gaps: [`${providerName} final message was empty.`],
       risks: ["Live provider output was empty."],
     };
   }
@@ -609,10 +621,14 @@ export function parseCodexFinalMessage(message) {
     status,
     summary,
     verification: verification.length > 0 ? verification : [clipMessage(text, 500)],
-    followUps: followUps.length > 0 ? followUps : ["Review the Codex final message for next steps."],
-    gaps: status === "blocked" ? ["Codex reported a blocked execution outcome."] : ["No code changes were applied automatically by this adapter path."],
-    risks: ["Live Codex execution remains lightly structured and should be reviewed by the Solo Operator."],
+    followUps: followUps.length > 0 ? followUps : [`Review the ${providerName} final message for next steps.`],
+    gaps: status === "blocked" ? [`${providerName} reported a blocked execution outcome.`] : ["No code changes were applied automatically by this adapter path."],
+    risks: [`Live ${providerName} execution remains lightly structured and should be reviewed by the Solo Operator.`],
   };
+}
+
+export function parseCodexFinalMessage(message) {
+  return parseProviderFinalMessage(message, { providerName: "Codex" });
 }
 
 export function buildLiveProviderSuccessResult({

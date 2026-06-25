@@ -2436,6 +2436,7 @@ async function runDispatch(args) {
   const liveProvider = args.includes("--live-provider");
   const detach = args.includes("--detach");
   const stubResult = readOption(args, "stub-result", "success");
+  const selectedProvider = readOption(args, "provider", "codex");
   const providerTimeoutMs = Number.parseInt(readOption(args, "provider-timeout-ms", "45000"), 10);
   const { artifact } = await resolveDispatchArtifact(args, { command: "run", status: "claimed" });
 
@@ -2457,7 +2458,7 @@ async function runDispatch(args) {
     if (detach && !liveProvider) {
       throw new Error("run -- --execute --detach currently requires --live-provider.");
     }
-    const provider = readOption(args, "provider", "codex");
+    const provider = selectedProvider;
     const providerAdapter = getProvider(provider, { commandAvailable, cwd });
     const runId = createProviderRunId(artifact.dispatch_id, nowIso());
     const providerRunDir = path.join(cwd, ".ai", "provider-runs");
@@ -2609,7 +2610,7 @@ async function runDispatch(args) {
             args: workerArgs,
           },
           result: {
-            summary: "Detached Codex execution launched.",
+            summary: `Detached ${provider} execution launched.`,
             follow_ups: ["Use `pnpm ops run-status` to inspect or finalize the run outcome."],
             gaps: [],
           },
@@ -2636,7 +2637,7 @@ async function runDispatch(args) {
           "Forbidden actions:",
           ...artifact.forbidden_actions.map((action) => `- ${action}`),
           "",
-          "Detached live Codex execution launched. Use `pnpm ops run-status` to inspect completion.",
+          `Detached live ${provider} execution launched. Use \`pnpm ops run-status\` to inspect completion.`,
           "",
           "Execution result:",
           `- Provider: ${provider} (live-detached)`,
@@ -2781,7 +2782,7 @@ async function runDispatch(args) {
       `- Loop Spec: ${loopSpecPath}`,
       `- Run bundle: ${bundlePath}`,
       `- Provider Run metadata: ${metadataPath}`,
-      liveProvider ? `- Codex final message: ${lastMessagePath}` : "",
+      liveProvider ? `- ${provider} final message: ${lastMessagePath}` : "",
       `- Completion report written: ${artifact.completion_report_target}`,
     ].filter(Boolean).join("\n");
   }
@@ -2806,9 +2807,9 @@ async function runDispatch(args) {
       ? "No provider was invoked. Worktree directory was prepared locally. No code was changed."
       : execute
         ? detach
-          ? "Detached live Codex execution launched. Use `pnpm ops run-status` to inspect completion."
+          ? `Detached live ${selectedProvider} execution launched. Use \`pnpm ops run-status\` to inspect completion.`
           : liveProvider
-          ? "Provider execution completed through the live Codex boundary. Review the Provider Run metadata and completion artifact."
+          ? `Provider execution completed through the live ${selectedProvider} boundary. Review the Provider Run metadata and completion artifact.`
           : "Provider execution completed through the stub boundary. No live provider was invoked and no code was changed."
         : "No provider was invoked. No worktree was created. No code was changed.",
     executionSummary,

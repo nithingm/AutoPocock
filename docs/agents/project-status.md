@@ -19,7 +19,7 @@ For the explicit completion audit against the active objective, use `docs/agents
 
 AutoPocock has crossed from a manual agentic repo template into a local, test-backed prototype of a provider-agnostic AI engineering operating system.
 
-The committed baseline on `origin/main` now includes the manual OS and the provider/DAG/Ralph automation layer: PRD creation, issue decomposition, handoff artifacts, GitHub bootstrap/export, scheduling, dispatch artifacts, claiming, runner preparation, completion reports, review prep, targeted QA, feedback classification, setup/context/PRD planes, layered DAG planning, DAG regeneration, DAG-to-GitHub sync and reconciliation, DAG quality gates, provider-neutral loop specs, wave approval, preflight validation, graph progression, repair insertion, Ralph pause/freeze policy, provider runs, a Codex provider adapter, and an artifact-first workflow console.
+The committed baseline on `origin/main` now includes the manual OS and the provider/DAG/Ralph automation layer: PRD creation, issue decomposition, handoff artifacts, GitHub bootstrap/export, scheduling, dispatch artifacts, claiming, runner preparation, completion reports, review prep, targeted QA, feedback classification, setup/context/PRD planes, layered DAG planning, DAG regeneration, DAG-to-GitHub sync and reconciliation, DAG quality gates, provider-neutral loop specs, wave approval, preflight validation, graph progression, repair insertion, Ralph pause/freeze policy, provider runs, Codex and Claude Code provider adapters, and an artifact-first workflow console.
 
 ## Verification Snapshot
 
@@ -31,7 +31,7 @@ pnpm test
 
 Observed result:
 
-- 197 tests passed
+- 202 tests passed
 - 0 tests failed
 
 This proves the current local source tree is internally coherent.
@@ -50,7 +50,7 @@ pnpm smoke:console
 Observed result:
 
 - `verify:project -- --strict-external` reports local readiness passed, GitHub Project read path passed, Project write scope present, and issue `#45` in a closed terminal state outside the active queue.
-- `setup` reports git, node, pnpm, GitHub CLI/auth, Codex provider, and workflow directories ready.
+- `setup` reports git, node, pnpm, GitHub CLI/auth, Codex provider, and workflow directories ready. Claude Code is supported by the provider registry for live runs with `--provider claude`; setup still uses Codex as the default provider readiness check.
 - `gh auth status` reports account `nithingm` with Project access sufficient for the strict verifier.
 - `github:init` remains dry-run-first and reports existing label drift without mutating GitHub.
 - `github:export -- --issue 45` writes a queue snapshot with 0 active non-Done items; issue `#45` is absent because it is closed and reconciled to Done.
@@ -66,7 +66,7 @@ Current branch:
 - latest commits include the PR `#56` merge and post-merge status/verifier updates
 - merged PR: `https://github.com/nithingm/AutoPocock/pull/56`
 
-The landed baseline includes the manual OS, original GitHub-backed workflow hardening, automation-layer implementation, opt-in scheduler conflict inference, artifact and Provider Run mirror update/dedup behavior, durable memory proposal decision/apply flow, tests, CI workflow, and durable status/orientation artifacts.
+The landed baseline includes the manual OS, original GitHub-backed workflow hardening, automation-layer implementation, opt-in scheduler conflict inference, artifact and Provider Run mirror update/dedup behavior, durable memory proposal decision/apply flow, Codex plus Claude Code provider adapters, tests, CI workflow, and durable status/orientation artifacts.
 
 Landed source/test/docs include:
 
@@ -151,10 +151,15 @@ The local Ralph run state is stale: it still records `#45` as `in_progress` and 
 
 ## Optional Follow-Up
 
-The core landing and tracker reconciliation are complete. Remaining cleanup is local scratch/demo hygiene, not broad feature invention.
+The core landing and tracker reconciliation are complete. Remaining work is product hardening beyond the current local prototype:
 
-1. Decide whether any intentionally unstaged scratch/demo artifacts should be deleted, ignored, or promoted in a later artifact-only PR.
-2. Run a live end-to-end validation after any follow-up changes:
+1. Automate GitHub Project creation, field creation, and view setup beyond the current report-first bootstrap contract.
+2. Define worktree directory layout, retention, and cleanup policy.
+3. Add Docker runner isolation before high-concurrency AFK execution.
+4. Extend dispatch claim locking beyond local filesystem coordination for distributed runners.
+5. Decide whether approved repo-local Durable Memory decisions should sync into external/user-level memory stores.
+6. Add more provider adapters only when a concrete provider boundary is needed beyond Codex and Claude Code.
+7. Run a live end-to-end validation after any follow-up changes:
    - `pnpm verify:project -- --strict-external`
    - `pnpm ops setup`
    - `pnpm ops github:export -- --issue <target>`

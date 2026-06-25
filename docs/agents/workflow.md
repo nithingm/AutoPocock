@@ -63,6 +63,7 @@ The Umbrella CLI stages the workflow:
 - `pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json`: validate a claimed dispatch without invoking a provider
 - `pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --prepare-worktree`: prepare the local worktree directory for a claimed worktree dispatch, then print the Runner Plan
 - `pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --execute`: execute from the approved Loop Spec, persist Provider Run metadata plus stdout/stderr logs, and enforce runtime stop/escalation conditions
+- `pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --execute --live-provider --provider claude`: run the same provider-neutral Loop Spec through the Claude Code adapter instead of the default Codex adapter
 - `pnpm ops run-mirror -- --run .ai/provider-runs/provider-run-id.json --issue 123`: dry-run a Provider Run update for a GitHub issue; add `--apply --update-existing` to refresh an existing marked Provider Run comment instead of posting a duplicate
 - `pnpm ops console -- --port 4173 --host 127.0.0.1`: launch the local workflow console UI over the same artifact and gate contracts the CLI uses
 

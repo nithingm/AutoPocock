@@ -37,7 +37,7 @@ Observed:
 
 - strict project verification passed for local readiness, Project read path, Project write scope, and issue `#45` closed terminal state
 - setup ready
-- 197 tests passed
+- 202 tests passed
 - export wrote `.ai/queue.json` with 0 active non-Done items
 - workflow console smoke passed on an ephemeral local port and closed cleanly
 - GitHub Actions CI passed for PR `#56` and for `main` after the merge
@@ -274,7 +274,7 @@ Likely files:
 
 Purpose:
 
-- land provider-neutral execution, Codex provider adapter, detached run status/cancel/mirror behavior, and artifact-first console UI
+- land provider-neutral execution, Codex and Claude Code provider adapters, detached run status/cancel/mirror behavior, and artifact-first console UI
 
 Likely files:
 
