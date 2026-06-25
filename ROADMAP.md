@@ -73,7 +73,7 @@ Execution lanes:
 
 - Current runner supports branch, worktree, guarded Docker isolation planning, and explicit Docker container launch.
 - Once the scheduler exists, default to worktree-first isolation.
-- Docker-isolated dispatches have an explicit image/workspace/network contract, a `--prepare-docker` plan, and an explicit `--execute --execute-docker` launch path that runs the provider command inside the declared container boundary.
+- Docker-isolated dispatches have an explicit image/workspace/network/env/volume contract, a `--prepare-docker` plan, and an explicit `--execute --execute-docker` launch path that runs the provider command inside the declared container boundary.
 - Provider-specific subagent execution belongs in a runner layer.
 - Runners must claim Dispatch Artifacts before execution.
 - Stale claims return to `queued` only with Solo Operator approval or future timeout policy.
@@ -117,7 +117,7 @@ Execution lanes:
 
 - How much of GitHub Project view setup should be automated beyond the current report-first contract; Project creation and field creation now have explicit apply paths.
 - Additional provider adapters beyond Codex and Claude Code, if the product boundary expands to more CLIs or hosted runners.
-- Production Docker image, credential, and writable workspace lifecycle policy for Docker-isolated runs.
+- Docker runtime policy is accepted in `docs/adr/2026-06-25-docker-runtime-policy.md`; future work should validate concrete hardened images and provider credential packages, not change the default safety boundary.
 - How to extend tracker-visible claim leases into true distributed compare-and-swap locking for multiple runners.
 - External/user-level memory sync is intentionally outside the current product boundary; approved Durable Memory decisions stay repo-local unless a future explicit connector boundary is designed and approved.
 

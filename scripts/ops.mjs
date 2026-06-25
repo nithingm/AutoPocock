@@ -116,6 +116,7 @@ Usage:
   pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --prepare-worktree
   pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --prepare-docker
   pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --execute --execute-docker
+  pnpm ops dispatch -- --issue 123 --title "Docker slice" --source manual --override-reason "Solo Operator approved" --isolation-mode docker --docker-env CODEX_HOME --docker-volume codex-cache:/codex-cache
   pnpm ops run -- --dispatch docs/agents/dispatches/dispatch-id.json --execute
   pnpm ops console -- --port 4173 --host 127.0.0.1
   pnpm ops run-status -- --run .ai/provider-runs/provider-run-id.json
@@ -189,13 +190,24 @@ function dockerContainerName(issue, title) {
   return `autopocock-${`${slugify(issue)}-${slugify(title)}`.replace(/^-+|-+$/g, "").slice(0, 48) || "dispatch"}`;
 }
 
-function defaultDockerSpec({ issue, title, image = "", workspace = "", network = "" } = {}) {
+function defaultDockerSpec({ issue, title, image = "", workspace = "", network = "", env = [], volumes = [] } = {}) {
   return {
     image: image || "node:22-bookworm",
     workspace: workspace || "/workspace",
     network: network || "bridge",
     container_name: dockerContainerName(issue, title),
+    env: Array.isArray(env) ? env : splitOptionList(env),
+    volumes: Array.isArray(volumes) ? volumes : splitOptionList(volumes),
   };
+}
+
+function dockerOverrideEntries(overrides = {}) {
+  return Object.entries(overrides).filter(([, value]) => {
+    if (Array.isArray(value)) {
+      return value.length > 0;
+    }
+    return Boolean(value);
+  });
 }
 
 function dockerSpecForDispatch(artifact, overrides = {}) {
@@ -206,9 +218,11 @@ function dockerSpecForDispatch(artifact, overrides = {}) {
       image: overrides.image,
       workspace: overrides.workspace,
       network: overrides.network,
+      env: overrides.env,
+      volumes: overrides.volumes,
     }),
     ...(artifact.docker || {}),
-    ...Object.fromEntries(Object.entries(overrides).filter(([, value]) => value)),
+    ...Object.fromEntries(dockerOverrideEntries(overrides)),
   };
 }
 
@@ -227,8 +241,10 @@ function dockerRunPlanForDispatch(artifact, { provider = "codex", liveProvider =
     docker.container_name,
     "--network",
     docker.network,
+    ...((docker.env || []).flatMap((name) => ["-e", name])),
     "-v",
     `${worktreePath}:${docker.workspace}`,
+    ...((docker.volumes || []).flatMap((volume) => ["-v", volume])),
     "-w",
     docker.workspace,
     docker.image,
@@ -250,6 +266,8 @@ function dockerRunPlanForDispatch(artifact, { provider = "codex", liveProvider =
     workspace: docker.workspace,
     network: docker.network,
     container_name: docker.container_name,
+    env: docker.env || [],
+    volumes: docker.volumes || [],
     worktree_path: worktreePath,
     command: "docker",
     args,
@@ -2472,6 +2490,8 @@ async function createDispatchArtifact({
   dockerImage = "",
   dockerWorkspace = "",
   dockerNetwork = "",
+  dockerEnv = [],
+  dockerVolumes = [],
   projectItemId = "",
 } = {}) {
   if (!issue) {
@@ -2510,6 +2530,8 @@ async function createDispatchArtifact({
         image: dockerImage,
         workspace: dockerWorkspace,
         network: dockerNetwork,
+        env: dockerEnv,
+        volumes: dockerVolumes,
       })
     : null;
 
@@ -2562,6 +2584,8 @@ async function dispatch(args) {
     dockerImage: readOption(args, "docker-image"),
     dockerWorkspace: readOption(args, "docker-workspace"),
     dockerNetwork: readOption(args, "docker-network"),
+    dockerEnv: splitOptionList(readOption(args, "docker-env")),
+    dockerVolumes: splitOptionList(readOption(args, "docker-volume")),
   });
 
   process.stdout.write(`${created.jsonTarget}\n${created.mdTarget}\n`);
@@ -2574,6 +2598,8 @@ async function claim(args) {
   const requestedDockerImage = readOption(args, "docker-image");
   const requestedDockerWorkspace = readOption(args, "docker-workspace");
   const requestedDockerNetwork = readOption(args, "docker-network");
+  const requestedDockerEnv = splitOptionList(readOption(args, "docker-env"));
+  const requestedDockerVolumes = splitOptionList(readOption(args, "docker-volume"));
   const leaseHours = parsePositiveNumber(readOption(args, "lease-hours", ""), 24, "Claim --lease-hours");
   const applyTracker = args.includes("--apply-tracker");
   let claimedArtifact = null;
@@ -2621,6 +2647,8 @@ async function claim(args) {
           image: requestedDockerImage,
           workspace: requestedDockerWorkspace,
           network: requestedDockerNetwork,
+          env: requestedDockerEnv,
+          volumes: requestedDockerVolumes,
         });
       }
     } else if (requestedWorktreePath) {
@@ -3436,6 +3464,8 @@ async function runDispatch(args) {
           `Docker workspace: ${dockerPlan.workspace}`,
           `Docker network: ${dockerPlan.network}`,
           `Docker container: ${dockerPlan.container_name}`,
+          `Docker env allowlist: ${dockerPlan.env.length > 0 ? dockerPlan.env.join(", ") : "none"}`,
+          `Docker extra volumes: ${dockerPlan.volumes.length > 0 ? dockerPlan.volumes.join(", ") : "none"}`,
           `Docker available: ${dockerReadiness ? (dockerReadiness.available ? "yes" : "no") : "not checked"}`,
           `Docker command: ${dockerPlan.rendered_command}`,
         ]
@@ -3447,7 +3477,7 @@ async function runDispatch(args) {
     ...artifact.forbidden_actions.map((action) => `- ${action}`),
     "",
     prepareDocker
-      ? "No provider was invoked. Docker isolation plan was prepared; provider execution inside Docker is not wired yet."
+      ? "No provider was invoked. Docker isolation plan was prepared and not executed."
       : prepareWorktree
       ? "No provider was invoked. Worktree directory was prepared locally. No code was changed."
       : execute

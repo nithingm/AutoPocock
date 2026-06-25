@@ -864,6 +864,8 @@ test("run --prepare-docker prints a Docker isolation plan without invoking a pro
           workspace: "/workspace",
           network: "none",
           container_name: "autopocock-57-docker-runner-proof",
+          env: ["CODEX_HOME"],
+          volumes: ["codex-cache:/codex-cache"],
         },
         handoff_artifact: "docs/agents/handoffs/docker.md",
         completion_report_target: "docs/agents/completions/dispatch-docker-completion.md",
@@ -884,8 +886,12 @@ test("run --prepare-docker prints a Docker isolation plan without invoking a pro
   assert.match(result.stdout, /Docker image: node:22-bookworm/);
   assert.match(result.stdout, /Docker workspace: \/workspace/);
   assert.match(result.stdout, /Docker network: none/);
+  assert.match(result.stdout, /Docker env allowlist: CODEX_HOME/);
+  assert.match(result.stdout, /Docker extra volumes: codex-cache:\/codex-cache/);
   assert.match(result.stdout, /Docker available: (yes|no)/);
   assert.match(result.stdout, /Docker command: docker run --rm -t --name autopocock-57-docker-runner-proof/);
+  assert.match(result.stdout, /-e CODEX_HOME/);
+  assert.match(result.stdout, /-v codex-cache:\/codex-cache/);
   assert.match(result.stdout, /No provider was invoked\. Docker isolation plan was prepared/);
   assert.ok((await stat(worktreePath)).isDirectory());
 });
@@ -921,6 +927,8 @@ test("run --execute requires explicit approval before launching Docker dispatche
           workspace: "/workspace",
           network: "none",
           container_name: "autopocock-57-docker-runner-proof",
+          env: ["CODEX_HOME"],
+          volumes: ["codex-cache:/codex-cache"],
         },
         handoff_artifact: handoffPath,
         completion_report_target: completionPath,
@@ -986,6 +994,8 @@ test("run --execute --execute-docker launches the rendered Docker command", asyn
           workspace: "/workspace",
           network: "none",
           container_name: "autopocock-57-docker-runner-proof",
+          env: ["CODEX_HOME"],
+          volumes: ["codex-cache:/codex-cache"],
         },
         handoff_artifact: handoffPath,
         completion_report_target: completionPath,
@@ -1016,9 +1026,13 @@ test("run --execute --execute-docker launches the rendered Docker command", asyn
   assert.equal(metadata.status, "succeeded");
   assert.equal(metadata.adapter_mode, "docker-stub");
   assert.equal(metadata.runtime.docker.executed, true);
+  assert.deepEqual(metadata.runtime.docker.env, ["CODEX_HOME"]);
+  assert.deepEqual(metadata.runtime.docker.volumes, ["codex-cache:/codex-cache"]);
   assert.equal(metadata.runtime.docker.exit_code, 0);
   assert.match(metadata.command_output.stdout, /docker container ran/);
   assert.match(dockerLog, /run --rm -t --name autopocock-57-docker-runner-proof/);
+  assert.match(dockerLog, /-e CODEX_HOME/);
+  assert.match(dockerLog, /-v codex-cache:\/codex-cache/);
   assert.match(dockerLog, /--inside-docker/);
   assert.doesNotMatch(dockerLog, /--live-provider/);
   assert.match(completion, /Docker container execution launched through node:22-bookworm/);

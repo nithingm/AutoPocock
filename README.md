@@ -24,7 +24,7 @@ pnpm qa
 `pnpm ops` is the Guided Flow entrypoint. The lower-level commands remain available for Manual Mode.
 `pnpm ops console -- --port 4173` launches a local artifact-first workflow console over Setup, Context, PRD, Graph, Execution, and Review.
 `pnpm ops run -- --execute --live-provider` defaults to Codex and can use Claude Code with `--provider claude` when that CLI is installed and authenticated.
-`pnpm ops run -- --prepare-docker` prints the Docker container boundary for a Docker-isolated dispatch. Add `--execute --execute-docker` after inspection to launch the rendered Docker command.
+`pnpm ops run -- --prepare-docker` prints the Docker container boundary for a Docker-isolated dispatch. Add `--execute --execute-docker` after inspection to launch the rendered Docker command; Docker credentials and extra mounts are explicit via `--docker-env` and `--docker-volume`.
 `pnpm ops worktree-clean` previews stale unreferenced `.worktrees` cleanup; add `--apply` only when you want deletion.
 `pnpm verify:project` runs the repeatable readiness check: setup, tests, console smoke, GitHub auth, and Project export visibility.
 
