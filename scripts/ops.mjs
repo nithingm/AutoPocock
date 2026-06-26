@@ -3566,8 +3566,8 @@ async function dockerValidate(args) {
   const provider = readOption(args, "provider", "");
   const requiredCommands = splitCommaOrPipeList(readOption(args, "require-command", "node,pnpm,git"));
   const envAllowlist = uniqueList([
-    ...splitOptionList(readOption(args, "docker-env")),
-    ...splitOptionList(readOption(args, "require-env")),
+    ...splitCommaOrPipeList(readOption(args, "docker-env")),
+    ...splitCommaOrPipeList(readOption(args, "require-env")),
   ]);
   const volumes = splitOptionList(readOption(args, "docker-volume"));
   const network = readOption(args, "docker-network", "none");
@@ -3729,12 +3729,12 @@ async function dockerPublishProvider(args) {
   const targetTag = readOption(args, "target-tag", "");
   const provider = readOption(args, "provider", "codex");
   const envAllowlist = uniqueList([
-    ...splitOptionList(readOption(args, "docker-env")),
-    ...splitOptionList(readOption(args, "credential-env")),
+    ...splitCommaOrPipeList(readOption(args, "docker-env")),
+    ...splitCommaOrPipeList(readOption(args, "credential-env")),
   ]);
   const credentialVolumes = uniqueList([
-    ...splitOptionList(readOption(args, "docker-volume")),
-    ...splitOptionList(readOption(args, "credential-volume")),
+    ...splitCommaOrPipeList(readOption(args, "docker-volume")),
+    ...splitCommaOrPipeList(readOption(args, "credential-volume")),
   ]);
   const apply = args.includes("--apply");
   const writePlan = args.includes("--write-plan");

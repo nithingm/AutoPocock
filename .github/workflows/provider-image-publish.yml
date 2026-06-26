@@ -1,0 +1,100 @@
+name: Provider Image Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_name:
+        description: "GHCR image name below the repository owner"
+        required: true
+        default: "autopocock-provider-runner"
+      image_tag:
+        description: "GHCR image tag to publish"
+        required: true
+        default: "main"
+      credential_env:
+        description: "Comma-separated runtime credential env allowlist"
+        required: false
+        default: "CODEX_HOME,CLAUDE_CONFIG_DIR"
+      credential_volume:
+        description: "Comma-separated runtime credential/cache volume allowlist"
+        required: false
+        default: "codex-cache:/codex-cache,claude-cache:/claude-cache"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build and validate provider image
+        run: pnpm ops docker:build-provider -- --tag autopocock-provider-runner:ci --validate
+
+      - name: Log in to GHCR
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Publish provider image
+        env:
+          OWNER: ${{ github.repository_owner }}
+          IMAGE_NAME: ${{ inputs.image_name }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          CREDENTIAL_ENV: ${{ inputs.credential_env }}
+          CREDENTIAL_VOLUME: ${{ inputs.credential_volume }}
+        run: |
+          set -euo pipefail
+          owner="$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')"
+          image_name="$(printf '%s' "$IMAGE_NAME" | tr '[:upper:]' '[:lower:]')"
+          target_tag="ghcr.io/${owner}/${image_name}:${IMAGE_TAG}"
+
+          args=(
+            docker:publish-provider
+            --
+            --source-tag autopocock-provider-runner:ci
+            --target-tag "$target_tag"
+            --write-plan
+            --apply
+            --approved-by "github-actions:${GITHUB_RUN_ID}"
+          )
+
+          if [ -n "$CREDENTIAL_ENV" ]; then
+            args+=(--credential-env "$CREDENTIAL_ENV")
+          fi
+          if [ -n "$CREDENTIAL_VOLUME" ]; then
+            args+=(--credential-volume "$CREDENTIAL_VOLUME")
+          fi
+
+          pnpm ops "${args[@]}"
+
+      - name: Write publish summary
+        env:
+          OWNER: ${{ github.repository_owner }}
+          IMAGE_NAME: ${{ inputs.image_name }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          owner="$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')"
+          image_name="$(printf '%s' "$IMAGE_NAME" | tr '[:upper:]' '[:lower:]')"
+          {
+            echo "## Provider Image Publish"
+            echo ""
+            echo "- Image: \`ghcr.io/${owner}/${image_name}:${IMAGE_TAG}\`"
+            echo "- Source commit: \`${GITHUB_SHA}\`"
+            echo "- Builder: \`${GITHUB_WORKFLOW}\` run \`${GITHUB_RUN_ID}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

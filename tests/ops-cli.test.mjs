@@ -369,6 +369,29 @@ test("docker:publish-provider validates and prints a dry-run publish plan withou
   assert.equal(json.approval.applied, false);
 });
 
+test("docker:publish-provider accepts PowerShell-flattened credential allowlists", async () => {
+  const cwd = await makeWorkspace();
+  const fakeDocker = await installFakeDocker(cwd);
+
+  const result = await runOps(cwd, [
+    "docker:publish-provider",
+    "--source-tag",
+    "autopocock-provider-runner:local",
+    "--target-tag",
+    "ghcr.io/example/autopocock-provider-runner:test",
+    "--credential-env",
+    "CODEX_HOME CLAUDE_CONFIG_DIR",
+    "--credential-volume",
+    "codex-cache:/codex-cache claude-cache:/claude-cache",
+  ], {
+    env: fakeDocker.env,
+  });
+
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Credential env allowlist: CODEX_HOME, CLAUDE_CONFIG_DIR/);
+  assert.match(result.stdout, /Credential volumes: codex-cache:\/codex-cache, claude-cache:\/claude-cache/);
+});
+
 test("docker:publish-provider requires approval before applying tag and push", async () => {
   const cwd = await makeWorkspace();
   const fakeDocker = await installFakeDocker(cwd);
