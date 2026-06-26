@@ -12,7 +12,7 @@ The manual operating system is GitHub-backed but artifact-led.
 
 - GitHub Issues and GitHub Projects carry live state.
 - Repo markdown under `docs/` and `issues/` carries the rich working context.
-- `pnpm ops` commands generate or validate those artifacts, but several GitHub setup steps remain manual in the current product shape.
+- `pnpm ops` commands generate, validate, and reconcile those artifacts. GitHub setup is dry-run-first; existing Project view rename/delete remains the only UI-only cleanup boundary while GitHub exposes no supported ProjectV2 view mutation for it.
 - The documented split from issue #13 is final for this phase: TDD stays a doc contract, `skills/engineering/` owns reusable agent workflows, `.ai/prompts/` owns reusable prompt content, and `prompts/` stays the wrapper layer.
 
 The operator has two valid entry branches:

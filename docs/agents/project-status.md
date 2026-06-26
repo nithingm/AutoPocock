@@ -156,21 +156,23 @@ Those reports claim the later wave slices are implemented and tested locally. Th
 
 The local Ralph run state is stale: it still records `#45` as `in_progress` and later issues as `pending`. Treat that runtime state as an old execution record until it is intentionally regenerated or reconciled.
 
-## Optional Follow-Up
+## Completion Boundary
 
-The core landing and tracker reconciliation are complete. Remaining work is product hardening beyond the current local prototype:
+The core landing, tracker reconciliation, Docker runner validation, provider readiness, lock audit path, and CI-backed publish path are complete for the current repo objective.
+
+Non-blocking operating boundaries:
 
 1. GitHub Project view setup is inspectable through GraphQL, including missing-view/name-drift reports and live mutation-capability evidence. Missing recommended views can be created through REST with `pnpm ops github:init -- --apply --create-project-views`; existing view rename/delete remains manual while supported APIs expose no view rename/delete operation.
-2. Package the GitHub ref distributed lock path beyond the landed scheduler dispatch policy, `claim-locks` text/JSON audit, orphan cleanup command, scheduled GitHub Actions audit, and Actions run-summary dashboard: external operator dashboards only if needed.
-3. The repo-owned provider image is now published where production runners can pull it: `ghcr.io/nithingm/autopocock-provider-runner:main`. The local image `autopocock-provider-runner:local` remains buildable and validated with pinned Codex and Claude Code CLIs. `pnpm ops docker:publish-provider` turns future registry/tag plus credential-package decisions into an explicit dry-run/apply command, and the `Provider Image Publish` workflow can republish through GitHub Actions `packages: write` permissions. Docker cleanup policy is implemented for stopped AutoPocock-managed containers; declared credential/cache volumes remain operator-owned and are intentionally not auto-deleted.
+2. Distributed claim locking has a GitHub ref CAS path, scheduler dispatch policy, `claim-locks` text/JSON audit, orphan cleanup command, scheduled GitHub Actions audit, and Actions run-summary dashboard. External operator dashboards are optional and should be added only if an operator needs a separate reporting surface.
+3. The repo-owned provider image is published for CI-backed production pulls at `ghcr.io/nithingm/autopocock-provider-runner:main`. The local image `autopocock-provider-runner:local` remains buildable and validated with pinned Codex and Claude Code CLIs. `pnpm ops docker:publish-provider` turns future registry/tag plus credential-package decisions into an explicit dry-run/apply command, and the `Provider Image Publish` workflow can republish through GitHub Actions `packages: write` permissions. Docker cleanup policy is implemented for stopped AutoPocock-managed containers; declared credential/cache volumes remain operator-owned and are intentionally not auto-deleted.
 4. Add more provider adapters only when a concrete provider boundary is needed beyond Codex and Claude Code. Use `pnpm ops providers -- --json --require-login` as the current adapter inventory and readiness check.
-5. Run a live end-to-end validation after any follow-up changes:
+5. After future changes, rerun the live completion checks:
    - `pnpm verify:project -- --strict-external`
-   - `pnpm ops setup`
-   - `pnpm ops github:export -- --issue <target>`
-   - scheduler or graph wave preview
-   - `pnpm smoke:console`
-   - at least one staged run path or fixture-backed equivalent
+   - `pnpm ops github:init`
+   - `pnpm ops providers -- --require-login`
+   - `pnpm ops docker:validate -- --image autopocock-provider-runner:local --provider codex --require-command node,pnpm,git,codex,claude`
+   - `pnpm ops docker:validate -- --image autopocock-provider-runner:local --provider claude --require-command node,pnpm,git,codex,claude`
+   - `pnpm ops docker:clean -- --max-age-hours 24`
 
 ## Current Operating Guidance
 

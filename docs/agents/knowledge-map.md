@@ -131,14 +131,16 @@ Observed:
 - Treat old `.ai/` runtime records as execution history, not current authority.
 - Keep runtime output out of commits unless it is intentionally promoted as evidence.
 
-## Optional Follow-Up
+## Completion Boundary
 
-The core landing and tracker reconciliation are complete. Remaining work is product hardening beyond the current local prototype:
+The core landing, tracker reconciliation, Docker runner validation, provider readiness, lock audit path, and CI-backed publish path are complete for the current repo objective.
 
-1. GitHub Project views are now inspected and drift-reported through GraphQL, `github:init` checks the live GraphQL mutation schema for ProjectV2 view capability, and missing recommended views can be created through REST with `github:init -- --apply --create-project-views`; existing view rename/delete remains UI-only while no supported API exposes those operations.
-2. Distributed claim locking now has a GitHub ref CAS path, scheduler dispatch policy, `claim-locks` text/JSON audit plus orphan cleanup, scheduled GitHub Actions audit, and an Actions run-summary dashboard; remaining deployment work is external operator dashboards only if needed.
+Non-blocking operating boundaries:
+
+1. GitHub Project views are inspected and drift-reported through GraphQL, `github:init` checks the live GraphQL mutation schema for ProjectV2 view capability, and missing recommended views can be created through REST with `github:init -- --apply --create-project-views`; existing view rename/delete remains UI-only while no supported API exposes those operations.
+2. Distributed claim locking has a GitHub ref CAS path, scheduler dispatch policy, `claim-locks` text/JSON audit plus orphan cleanup, scheduled GitHub Actions audit, and an Actions run-summary dashboard; external operator dashboards are optional.
 3. Build and validate the default provider image with `pnpm ops docker:build-provider -- --tag autopocock-provider-runner:local --validate`; use published image `ghcr.io/nithingm/autopocock-provider-runner:main` for production pulls, `pnpm ops docker:publish-provider` for dry-run-first registry tag/push planning, the `Provider Image Publish` workflow for GHCR publishing through GitHub Actions package permissions, and `pnpm ops docker:validate` for any alternate deployment image or credential package.
-4. Re-run full local tests plus strict live tracker verification after any follow-up updates.
+4. Re-run strict live verification, provider inventory, Docker validation, and Docker cleanup checks after any follow-up updates.
 
 ## Continuation Brief
 
