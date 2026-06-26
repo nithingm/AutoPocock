@@ -9,6 +9,7 @@ import {
   inspectProjectFields,
   inspectProjectViewMutationCapability,
   inspectProjectViews,
+  planProjectFieldUpdateCommands,
   planProjectCreateCommand,
   renderProjectViewPlanMarkdown,
 } from "../scripts/lib/github-init.mjs";
@@ -197,18 +198,88 @@ test("apply mode creates missing Project fields only with the explicit project-f
   assert.match(report.text, /created: Review Capacity Cost/);
 });
 
-test("Project field drift is reported instead of mutated", () => {
+test("Project field drift plans only supported single-select option rename updates", () => {
   const config = makeConfig();
   const inspection = inspectProjectFields(config.projectSchema.requiredFields, [
-    { name: "Execution Stage", type: "ProjectV2SingleSelectField", options: [{ name: "Inbox" }, { name: "Ready" }] },
+    {
+      id: "field-1",
+      name: "Execution Stage",
+      type: "ProjectV2SingleSelectField",
+      options: [
+        { id: "option-1", name: "Inbox", color: "GRAY", description: "" },
+        { id: "option-2", name: "done", color: "BLUE", description: "finished" },
+      ],
+    },
     { name: "Dispatch ID", type: "ProjectV2Field" },
   ]);
+  const plans = planProjectFieldUpdateCommands(inspection);
 
   assert.equal(inspection[0].status, "drift");
   assert.equal(inspection[0].drift[0].field, "options");
   assert.match(inspection[0].drift[0].expected, /Inbox, Done/);
-  assert.match(inspection[0].drift[0].actual, /Inbox, Ready/);
+  assert.match(inspection[0].drift[0].actual, /Inbox, done/);
   assert.equal(inspection[1].status, "present");
+  assert.equal(plans.length, 1);
+  assert.equal(plans[0].supported, true);
+  assert.equal(plans[0].mutation.variables.fieldId, "field-1");
+  assert.deepEqual(plans[0].mutation.variables.singleSelectOptions, [
+    { id: "option-1", name: "Inbox", color: "GRAY", description: "" },
+    { id: "option-2", name: "Done", color: "BLUE", description: "finished" },
+  ]);
+});
+
+test("Project field drift with unmatched options remains manual", () => {
+  const config = makeConfig();
+  const inspection = inspectProjectFields(config.projectSchema.requiredFields, [
+    {
+      id: "field-1",
+      name: "Execution Stage",
+      type: "ProjectV2SingleSelectField",
+      options: [
+        { id: "option-1", name: "Inbox", color: "GRAY", description: "" },
+        { id: "option-2", name: "Ready", color: "BLUE", description: "" },
+      ],
+    },
+  ]);
+  const plans = planProjectFieldUpdateCommands(inspection);
+
+  assert.equal(inspection[0].status, "drift");
+  assert.equal(plans.length, 1);
+  assert.equal(plans[0].supported, false);
+  assert.match(plans[0].reason, /one-to-one single-select option rename drift/);
+});
+
+test("apply mode updates supported Project field drift only with the explicit update flag", async () => {
+  const config = makeConfig();
+  const updateCalls = [];
+  const report = await createGitHubBootstrapReport(config, {
+    apply: true,
+    updateProjectFields: true,
+    existingLabels: buildCanonicalLabelDefinitions(config),
+    existingProjectFields: [
+      {
+        id: "field-1",
+        name: "Execution Stage",
+        type: "ProjectV2SingleSelectField",
+        options: [
+          { id: "option-1", name: "Inbox", color: "GRAY", description: "" },
+          { id: "option-2", name: "done", color: "BLUE", description: "finished" },
+        ],
+      },
+      { name: "Dispatch ID", type: "ProjectV2Field" },
+      { name: "Review Capacity Cost", type: "ProjectV2Field" },
+    ],
+    projectFieldUpdateRunner: async (command, args, field, planned) => {
+      updateCalls.push({ command, args, field, planned });
+      return { code: 0, stdout: `updated ${field.name}`, stderr: "" };
+    },
+  });
+
+  assert.equal(updateCalls.length, 1);
+  assert.deepEqual(updateCalls[0].args, ["api", "graphql"]);
+  assert.equal(updateCalls[0].planned.mutation.variables.fieldId, "field-1");
+  assert.match(report.text, /Project Field Update Results/);
+  assert.match(report.text, /updated: Execution Stage/);
 });
 
 test("Project view inspection detects exact-name misses and whitespace drift", () => {

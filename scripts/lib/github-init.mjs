@@ -147,10 +147,31 @@ function normalizeExistingProjectField(field) {
     return null;
   }
 
+  const optionDetails = Array.isArray(field.options)
+    ? field.options.map((option) => {
+        if (typeof option === "string") {
+          return {
+            id: "",
+            name: option,
+            color: "GRAY",
+            description: "",
+          };
+        }
+        return {
+          id: option.id || "",
+          name: option.name || "",
+          color: option.color || "GRAY",
+          description: option.description || "",
+        };
+      }).filter((option) => option.name)
+    : [];
+
   return {
+    id: field.id || "",
     name: field.name || "",
-    type: field.type || "",
-    options: Array.isArray(field.options) ? field.options.map((option) => option.name || option).filter(Boolean) : [],
+    type: field.type || field.dataType || "",
+    options: optionDetails.map((option) => option.name),
+    optionDetails,
   };
 }
 
@@ -225,6 +246,90 @@ export function planProjectFieldCreateCommands(projectFieldInspection, { project
         command: "gh",
         args,
         field,
+      };
+    });
+}
+
+function projectOptionKey(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function singleSelectUpdatePayload(field) {
+  if (field.status !== "drift" || field.dataType !== "SINGLE_SELECT" || !field.actual?.id) {
+    return null;
+  }
+
+  const expectedOptions = field.values || [];
+  const actualOptions = field.actual.optionDetails || [];
+  if (expectedOptions.length !== actualOptions.length) {
+    return null;
+  }
+
+  const byExactName = new Map(actualOptions.map((option) => [option.name, option]));
+  const byNormalizedName = new Map(actualOptions.map((option) => [projectOptionKey(option.name), option]));
+  const usedOptionIds = new Set();
+  const mappedOptions = [];
+
+  for (const expectedName of expectedOptions) {
+    const actual = byExactName.get(expectedName) || byNormalizedName.get(projectOptionKey(expectedName));
+    if (!actual?.id || usedOptionIds.has(actual.id)) {
+      return null;
+    }
+
+    usedOptionIds.add(actual.id);
+    mappedOptions.push({
+      id: actual.id,
+      name: expectedName,
+      color: actual.color || "GRAY",
+      description: actual.description || "",
+    });
+  }
+
+  if (mappedOptions.length !== actualOptions.length) {
+    return null;
+  }
+
+  return mappedOptions;
+}
+
+export const UPDATE_PROJECT_FIELD_MUTATION = `mutation($fieldId: ID!, $singleSelectOptions: [ProjectV2SingleSelectFieldOptionInput!]) {
+  updateProjectV2Field(input: { fieldId: $fieldId, singleSelectOptions: $singleSelectOptions }) {
+    projectV2Field {
+      ... on ProjectV2SingleSelectField {
+        id
+        name
+      }
+    }
+  }
+}`;
+
+export function planProjectFieldUpdateCommands(projectFieldInspection) {
+  return projectFieldInspection
+    .filter((field) => field.status === "drift")
+    .map((field) => {
+      const singleSelectOptions = singleSelectUpdatePayload(field);
+      if (!singleSelectOptions) {
+        return {
+          command: "",
+          args: [],
+          field,
+          supported: false,
+          reason: "Only one-to-one single-select option rename drift is supported for automatic updates.",
+        };
+      }
+
+      return {
+        command: "gh",
+        args: ["api", "graphql"],
+        field,
+        supported: true,
+        mutation: {
+          query: UPDATE_PROJECT_FIELD_MUTATION,
+          variables: {
+            fieldId: field.actual.id,
+            singleSelectOptions,
+          },
+        },
       };
     });
 }
@@ -529,10 +634,13 @@ export function renderGitHubBootstrapReport({
   projectViewMutationCapability = inspectProjectViewMutationCapability(),
   createCommands = [],
   projectFieldCreateCommands = [],
+  projectFieldUpdateCommands = [],
   applyResults = [],
   projectFieldApplyResults = [],
+  projectFieldUpdateResults = [],
   createProject = false,
   createProjectFields = false,
+  updateProjectFields = false,
 }) {
   const lines = [
     "# GitHub Tracker Bootstrap",
@@ -542,8 +650,8 @@ export function renderGitHubBootstrapReport({
   ];
 
   if (mode === "apply") {
-    lines.push("Only missing canonical labels and explicitly requested Project/project-field resources were eligible for creation.");
-    lines.push("Existing labels and Project fields were left untouched, including any drift.");
+    lines.push("Only missing canonical labels and explicitly requested Project/project-field resources were eligible for mutation.");
+    lines.push("Existing label drift is left untouched. Existing Project field drift is updated only with `--update-project-fields` when the update is supported.");
   } else {
     lines.push("No GitHub labels, issues, projects, fields, or comments were created or modified.");
   }
@@ -668,15 +776,22 @@ export function renderGitHubBootstrapReport({
   }
 
   lines.push("", "## Planned Project Field Changes", "");
-  if (projectFieldCreateCommands.length === 0) {
+  if (projectFieldCreateCommands.length === 0 && projectFieldUpdateCommands.length === 0) {
     lines.push("- None");
-  } else if (!createProjectFields) {
-    for (const planned of projectFieldCreateCommands) {
-      lines.push(`- would create with --create-project-fields: ${planned.field.name}`);
-    }
   } else {
     for (const planned of projectFieldCreateCommands) {
-      lines.push(`- would create: ${planned.field.name}`);
+      lines.push(createProjectFields
+        ? `- would create: ${planned.field.name}`
+        : `- would create with --create-project-fields: ${planned.field.name}`);
+    }
+    for (const planned of projectFieldUpdateCommands) {
+      if (planned.supported) {
+        lines.push(updateProjectFields
+          ? `- would update: ${planned.field.name}`
+          : `- would update with --update-project-fields: ${planned.field.name}`);
+      } else {
+        lines.push(`- manual Project field drift repair required: ${planned.field.name} (${planned.reason})`);
+      }
     }
   }
 
@@ -689,6 +804,17 @@ export function renderGitHubBootstrapReport({
     } else {
       for (const result of projectFieldApplyResults) {
         lines.push(`- created: ${result.field.name}`);
+      }
+    }
+
+    lines.push("", "## Project Field Update Results", "");
+    if (!updateProjectFields) {
+      lines.push("- Skipped. Add `--update-project-fields` to update supported Project field drift.");
+    } else if (projectFieldUpdateResults.length === 0) {
+      lines.push("- No Project fields were updated.");
+    } else {
+      for (const result of projectFieldUpdateResults) {
+        lines.push(`- updated: ${result.field.name}`);
       }
     }
   }
@@ -743,6 +869,7 @@ export function renderGitHubBootstrapReport({
   lines.push("", "## Notes", "");
   lines.push("- Project creation is allowed only with `--apply --create-project` and no existing configured Project reference.");
   lines.push("- Project fields are dry-run-first and are created only with `--apply --create-project-fields`.");
+  lines.push("- Supported Project field drift is dry-run-first and updated only with `--apply --update-project-fields`.");
   lines.push("- Project views are inspected through GraphQL when available; creation and renaming remain manual unless the live GraphQL schema exposes a verified ProjectV2 view mutation contract.");
   lines.push("- Tracker Drift is reported for canonical label mismatches and never auto-corrected.");
 
@@ -781,6 +908,22 @@ export async function applyMissingProjectFields(projectFieldInspection, options 
   return results;
 }
 
+export async function applyProjectFieldUpdates(projectFieldInspection, options = {}) {
+  const runner = options.projectFieldUpdateRunner || options.runner || (async () => ({ code: 0, stdout: "", stderr: "" }));
+  const planned = planProjectFieldUpdateCommands(projectFieldInspection).filter((command) => command.supported);
+  const results = [];
+
+  for (const plannedCommand of planned) {
+    const execution = await runner(plannedCommand.command, plannedCommand.args, plannedCommand.field, plannedCommand);
+    results.push({
+      ...plannedCommand,
+      execution,
+    });
+  }
+
+  return results;
+}
+
 export async function createGitHubBootstrapReport(config, options = {}) {
   const canonicalLabels = buildCanonicalLabelDefinitions(config, options);
   const labelInspection = inspectCanonicalLabels(canonicalLabels, options.existingLabels || []);
@@ -805,6 +948,9 @@ export async function createGitHubBootstrapReport(config, options = {}) {
         owner,
       })
     : [];
+  const projectFieldUpdateCommands = hasProjectFieldInspection
+    ? planProjectFieldUpdateCommands(projectFieldInspection)
+    : [];
   const mode = options.apply ? "apply" : "dry-run";
   const applyResults = options.apply ? await applyMissingCanonicalLabels(labelInspection, options) : [];
   const projectCreateResult = options.apply && options.createProject
@@ -817,6 +963,9 @@ export async function createGitHubBootstrapReport(config, options = {}) {
         projectNumber: fieldProjectNumber,
         owner,
       })
+    : [];
+  const projectFieldUpdateResults = options.apply && options.updateProjectFields
+    ? await applyProjectFieldUpdates(projectFieldInspection, options)
     : [];
 
   return {
@@ -831,6 +980,7 @@ export async function createGitHubBootstrapReport(config, options = {}) {
     applyResults,
     projectCreateResult,
     projectFieldApplyResults,
+    projectFieldUpdateResults,
     projectViewMutationCapability,
     text: renderGitHubBootstrapReport({
       mode,
@@ -853,10 +1003,13 @@ export async function createGitHubBootstrapReport(config, options = {}) {
       projectViewMutationCapability,
       createCommands,
       projectFieldCreateCommands,
+      projectFieldUpdateCommands,
       applyResults,
       projectFieldApplyResults,
+      projectFieldUpdateResults,
       createProject: Boolean(options.createProject),
       createProjectFields: Boolean(options.createProjectFields),
+      updateProjectFields: Boolean(options.updateProjectFields),
     }),
   };
 }

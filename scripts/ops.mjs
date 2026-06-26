@@ -120,6 +120,7 @@ Usage:
   pnpm ops github:init -- --write-view-plan
   pnpm ops github:init -- --apply --create-project --project-title "AutoPocock"
   pnpm ops github:init -- --apply --create-project-fields
+  pnpm ops github:init -- --apply --update-project-fields
   pnpm ops github:export
   pnpm ops ralph -- --plan docs/agents/loop-specs/plan.json
   pnpm ops ralph -- --plan docs/agents/loop-specs/plan.json --approve-wave wave-0 --approved-by solo-operator
@@ -1766,6 +1767,7 @@ async function gitHubInit(args = []) {
   const apply = args.includes("--apply");
   const createProject = args.includes("--create-project");
   const createProjectFields = args.includes("--create-project-fields");
+  const updateProjectFields = args.includes("--update-project-fields");
   const writeViewPlan = args.includes("--write-view-plan");
   const projectTitle = readOption(args, "project-title", config.github?.repo || "AutoPocock");
   const ghVersion = await commandAvailable("gh");
@@ -1822,18 +1824,43 @@ async function gitHubInit(args = []) {
     throw new Error("github:init -- --create-project-fields requires a configured GitHub Project number or --project-number.");
   }
 
-  if (ghVersion.available && auth?.available && project.projectNumber) {
+  if (updateProjectFields && !apply) {
+    throw new Error("github:init -- --update-project-fields requires --apply.");
+  }
+
+  if (updateProjectFields && !project.projectNumber && !project.projectId) {
+    throw new Error("github:init -- --update-project-fields requires a configured GitHub Project number/project ID or --project-number/--project-id.");
+  }
+
+  if (ghVersion.available && auth?.available && (project.projectId || (project.projectNumber && project.owner))) {
     try {
-      const fieldResult = await runCommand("gh", [
-        "project",
-        "field-list",
-        String(project.projectNumber),
-        "--owner",
-        project.owner,
-        "--format",
-        "json",
-      ]);
-      existingProjectFields = JSON.parse(fieldResult.stdout).fields || [];
+      const projectOwnerKind = String(project.projectUrl || "").includes("/orgs/") ? "organization" : "user";
+      const fieldResult = await runCommand("gh", project.projectId
+        ? [
+            "api",
+            "graphql",
+            "--raw-field",
+            "query=query($projectId: ID!) { node(id: $projectId) { ... on ProjectV2 { fields(first: 100) { nodes { __typename ... on ProjectV2Field { id name dataType } ... on ProjectV2SingleSelectField { id name dataType options { id name color description } } ... on ProjectV2IterationField { id name dataType } } } } } }",
+            "-f",
+            `projectId=${project.projectId}`,
+          ]
+        : [
+            "api",
+            "graphql",
+            "--raw-field",
+            projectOwnerKind === "organization"
+              ? "query=query($owner: String!, $number: Int!) { organization(login: $owner) { projectV2(number: $number) { fields(first: 100) { nodes { __typename ... on ProjectV2Field { id name dataType } ... on ProjectV2SingleSelectField { id name dataType options { id name color description } } ... on ProjectV2IterationField { id name dataType } } } } } }"
+              : "query=query($owner: String!, $number: Int!) { user(login: $owner) { projectV2(number: $number) { fields(first: 100) { nodes { __typename ... on ProjectV2Field { id name dataType } ... on ProjectV2SingleSelectField { id name dataType options { id name color description } } ... on ProjectV2IterationField { id name dataType } } } } } }",
+            "-f",
+            `owner=${project.owner}`,
+            "-F",
+            `number=${Number(project.projectNumber)}`,
+          ]);
+      const parsed = JSON.parse(fieldResult.stdout || "{}");
+      existingProjectFields = parsed.data?.node?.fields?.nodes
+        || parsed.data?.user?.projectV2?.fields?.nodes
+        || parsed.data?.organization?.projectV2?.fields?.nodes
+        || [];
       projectFieldInspectionAvailable = true;
     } catch {
       existingProjectFields = [];
@@ -1896,10 +1923,15 @@ async function gitHubInit(args = []) {
     throw new Error("github:init -- --create-project-fields could not inspect existing Project fields. Fix Project access before applying.");
   }
 
+  if (updateProjectFields && !projectFieldInspectionAvailable) {
+    throw new Error("github:init -- --update-project-fields could not inspect existing Project fields. Fix Project access before applying.");
+  }
+
   const report = await createGitHubBootstrapReport(config, {
     apply,
     createProject,
     createProjectFields,
+    updateProjectFields,
     projectTitle,
     gh: {
       available: ghVersion.available,
@@ -1916,6 +1948,18 @@ async function gitHubInit(args = []) {
     runner: async (command, args) => runCommand(command, [...args, ...repoArgs]),
     projectRunner: async (command, args) => runCommand(command, args),
     projectFieldRunner: async (command, args) => runCommand(command, args),
+    projectFieldUpdateRunner: async (command, args, field, planned) => {
+      const dir = path.join(cwd, ".ai", "tmp");
+      await mkdir(dir, { recursive: true });
+      const slug = field.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "project-field";
+      const inputPath = path.join(dir, `${nowForFile()}-${slug}-field-update.json`);
+      await writeFile(inputPath, `${JSON.stringify(planned.mutation, null, 2)}\n`, "utf8");
+      try {
+        return await runCommand(command, [...args, "--input", inputPath]);
+      } finally {
+        await unlink(inputPath).catch(() => {});
+      }
+    },
   });
 
   process.stdout.write(report.text);
@@ -1924,6 +1968,7 @@ async function gitHubInit(args = []) {
   process.stdout.write("- Use `pnpm ops github:init -- --apply` for missing label creation.\n");
   process.stdout.write("- Use `pnpm ops github:init -- --apply --create-project --project-title \"Name\"` only for fresh setups without a configured Project reference.\n");
   process.stdout.write("- Use `pnpm ops github:init -- --apply --create-project-fields` to create missing configured Project fields.\n");
+  process.stdout.write("- Use `pnpm ops github:init -- --apply --update-project-fields` to update supported Project field drift after dry-run review.\n");
   process.stdout.write("- Use `pnpm ops github:init -- --write-view-plan` to write an exact Prepared Human Step for Project view create/rename workarounds.\n");
   process.stdout.write("- Create, rename, or adjust GitHub Project views manually when Project View Inspection reports missing views or drift; GitHub CLI/GraphQL do not expose ProjectV2 view mutations.\n");
 

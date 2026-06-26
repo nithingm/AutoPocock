@@ -109,7 +109,7 @@ Observed:
 - `pnpm verify:project -- --strict-external` passes for local readiness, Project read path, Project write scope, and issue `#45` closed terminal state
 - local setup reports git, node, pnpm, GitHub CLI/auth, Codex provider readiness, Claude provider readiness, and workflow directories ready; `pnpm ops providers` exposes the direct provider inventory
 - `github:init -- --apply --create-project` is now a guarded fresh-setup path that refuses duplicate Project creation when a Project reference exists
-- `github:init -- --apply --create-project-fields` created the missing configured optional Project fields, while continuing to report existing drift without rewriting fields
+- `github:init -- --apply --create-project-fields` created the missing configured optional Project fields, and `github:init -- --apply --update-project-fields` repaired the supported `Execution Stage` option-name drift after a dry-run report
 - `run -- --prepare-docker` exposes Docker image/workspace/network/env/volume isolation plans, and `run -- --execute --execute-docker` launches the rendered container command after explicit approval
 - `docker:validate` probes proposed Docker execution images with no network and checks required commands, provider CLIs, and explicit credential env allowlists before live use
 - `claim -- --apply-tracker` can write the runner lease to the GitHub Project `Runner` field when a scheduler-created dispatch retained its `project_item_id`
