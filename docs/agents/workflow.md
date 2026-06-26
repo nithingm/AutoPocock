@@ -69,6 +69,7 @@ The Umbrella CLI stages the workflow:
 - `pnpm ops github:init -- --apply --create-project --project-title "Name"`: create a fresh GitHub Project only when no Project reference is already configured
 - `pnpm ops github:init -- --apply --create-project-fields`: create missing configured GitHub Project fields after inspecting existing fields and reporting drift
 - `pnpm ops github:init -- --apply --update-project-fields`: update supported single-select Project field option-name drift after a dry-run report confirms the exact change
+- `pnpm ops github:init -- --apply --create-project-views`: create missing recommended GitHub Project views through the REST Project views API after inspecting existing views
 - `pnpm ops github:export`: export non-`Done` GitHub Project issues into `.ai/queue.json`
 - `pnpm ops claim -- --dispatch docs/agents/dispatches/dispatch-id.json --claimed-by runner-name --apply-lock-ref`: acquire an atomic GitHub ref lock before mutating the local dispatch claim
 - `pnpm ops claim-locks`: inspect distributed GitHub claim lock refs and identify active, stale, and orphaned locks
@@ -99,8 +100,8 @@ GitHub-backed flow depends on a real project configuration, not just local files
 - `pnpm ops setup` is the top-level readiness check for local structure, host environment, provider availability, and GitHub config/auth state.
 - `.ai/ops.config.json` must contain the intended GitHub owner, repo, and Project reference.
 - `gh` must be installed and authenticated before `pnpm ops github:init`, `pnpm ops github:export`, `pnpm ops schedule -- --apply`, `pnpm ops mirror -- --apply`, or `pnpm ops feedback -- --apply`.
-- `pnpm ops github:init` is a bootstrap report by default. With `-- --apply`, it creates missing canonical labels. Add `--create-project` for a fresh Project when no Project reference is configured, add `--create-project-fields` to create missing configured Project fields, and add `--update-project-fields` to repair supported Project field option-name drift.
-- GitHub Project view creation and renaming are still manual while the live GitHub GraphQL schema exposes no ProjectV2 view mutations; use `pnpm ops github:init -- --write-view-plan` to generate the exact manual workaround artifact, verification command, and current schema capability evidence.
+- `pnpm ops github:init` is a bootstrap report by default. With `-- --apply`, it creates missing canonical labels. Add `--create-project` for a fresh Project when no Project reference is configured, add `--create-project-fields` to create missing configured Project fields, add `--update-project-fields` to repair supported Project field option-name drift, and add `--create-project-views` to create missing recommended views through REST.
+- GitHub Project view creation is available through the REST Project views API. Existing view rename/delete remains manual while the supported APIs inspected here expose no view rename/delete operation; use `pnpm ops github:init -- --write-view-plan` to generate an exact workaround artifact when drift remains.
 - `pnpm ops board` prints the board contract only. It does not verify live GitHub schema drift.
 
 The required GitHub Project fields for the manual OS are:

@@ -435,6 +435,41 @@ export function inspectProjectViews(recommendedViews = [], existingViews = []) {
   });
 }
 
+export function planProjectViewCreateCommands(projectViewInspection, {
+  projectNumber = "",
+  owner = "",
+  ownerType = "user",
+} = {}) {
+  return projectViewInspection
+    .filter((view) => view.status === "missing" || view.status === "drift")
+    .map((view) => {
+      const endpoint = ownerType === "organization"
+        ? `orgs/${owner}/projectsV2/${projectNumber}/views`
+        : `users/${owner}/projectsV2/${projectNumber}/views`;
+      return {
+        command: "gh",
+        args: [
+          "api",
+          "-X",
+          "POST",
+          endpoint,
+          "-H",
+          "Accept: application/vnd.github+json",
+          "-H",
+          "X-GitHub-Api-Version: 2026-03-10",
+          "-f",
+          `name=${view.name}`,
+          "-f",
+          "layout=table",
+        ],
+        view,
+        reason: view.status === "drift"
+          ? "REST can create an exact replacement view, but does not expose view rename/delete."
+          : "Recommended view is missing.",
+      };
+    });
+}
+
 export function buildProjectViewPlan({
   repository = {},
   projectViews = [],
@@ -635,12 +670,15 @@ export function renderGitHubBootstrapReport({
   createCommands = [],
   projectFieldCreateCommands = [],
   projectFieldUpdateCommands = [],
+  projectViewCreateCommands = [],
   applyResults = [],
   projectFieldApplyResults = [],
   projectFieldUpdateResults = [],
+  projectViewCreateResults = [],
   createProject = false,
   createProjectFields = false,
   updateProjectFields = false,
+  createProjectViews = false,
 }) {
   const lines = [
     "# GitHub Tracker Bootstrap",
@@ -650,7 +688,7 @@ export function renderGitHubBootstrapReport({
   ];
 
   if (mode === "apply") {
-    lines.push("Only missing canonical labels and explicitly requested Project/project-field resources were eligible for mutation.");
+    lines.push("Only missing canonical labels and explicitly requested Project/project-field/view resources were eligible for mutation.");
     lines.push("Existing label drift is left untouched. Existing Project field drift is updated only with `--update-project-fields` when the update is supported.");
   } else {
     lines.push("No GitHub labels, issues, projects, fields, or comments were created or modified.");
@@ -850,27 +888,46 @@ export function renderGitHubBootstrapReport({
   }
 
   lines.push("", "## Planned Project View Changes", "");
-  if (projectViewInspection.some((view) => view.status === "missing" || view.status === "drift")) {
+  if (projectViewCreateCommands.length > 0) {
+    lines.push("- REST Project view creation is available for missing recommended views.");
     if (projectViewMutationCapability.view_mutations_available) {
-      lines.push("- Candidate Project view mutations exist in the GraphQL schema, but automatic mutation is not implemented until the mutation contract is verified.");
+      lines.push("- Candidate Project view mutations exist in the GraphQL schema, but view rename/delete automation is not implemented until the mutation contract is verified.");
     } else {
-      lines.push("- No automatic Project view changes are available through GitHub CLI/GraphQL.");
+      lines.push("- GraphQL still exposes no ProjectV2 view create/update/rename mutations.");
     }
-    for (const view of projectViewInspection.filter((candidate) => candidate.status === "missing")) {
-      lines.push(`- manual create: ${view.name}`);
-    }
-    for (const view of projectViewInspection.filter((candidate) => candidate.status === "drift")) {
-      lines.push(`- manual rename: ${view.actual.name} -> ${view.name}`);
+    for (const planned of projectViewCreateCommands) {
+      if (planned.view.status === "drift") {
+        lines.push(createProjectViews
+          ? `- would create exact replacement view: ${planned.view.name} (current drifted view remains: ${planned.view.actual.name})`
+          : `- would create exact replacement view with --create-project-views: ${planned.view.name} (current drifted view remains: ${planned.view.actual.name})`);
+      } else {
+        lines.push(createProjectViews
+          ? `- would create: ${planned.view.name}`
+          : `- would create with --create-project-views: ${planned.view.name}`);
+      }
     }
   } else {
     lines.push("- None");
+  }
+
+  if (mode === "apply") {
+    lines.push("", "## Project View Apply Results", "");
+    if (!createProjectViews) {
+      lines.push("- Skipped. Add `--create-project-views` to create missing recommended Project views through REST.");
+    } else if (projectViewCreateResults.length === 0) {
+      lines.push("- No Project views were created.");
+    } else {
+      for (const result of projectViewCreateResults) {
+        lines.push(`- created: ${result.view.name}`);
+      }
+    }
   }
 
   lines.push("", "## Notes", "");
   lines.push("- Project creation is allowed only with `--apply --create-project` and no existing configured Project reference.");
   lines.push("- Project fields are dry-run-first and are created only with `--apply --create-project-fields`.");
   lines.push("- Supported Project field drift is dry-run-first and updated only with `--apply --update-project-fields`.");
-  lines.push("- Project views are inspected through GraphQL when available; creation and renaming remain manual unless the live GraphQL schema exposes a verified ProjectV2 view mutation contract.");
+  lines.push("- Project views are inspected through GraphQL. Missing recommended views can be created through REST with `--apply --create-project-views`; existing view rename/delete remains unavailable through the supported APIs inspected here.");
   lines.push("- Tracker Drift is reported for canonical label mismatches and never auto-corrected.");
 
   return `${lines.join("\n")}\n`;
@@ -924,6 +981,22 @@ export async function applyProjectFieldUpdates(projectFieldInspection, options =
   return results;
 }
 
+export async function applyProjectViewCreates(projectViewInspection, options = {}) {
+  const runner = options.projectViewRunner || options.runner || (async () => ({ code: 0, stdout: "", stderr: "" }));
+  const planned = planProjectViewCreateCommands(projectViewInspection, options);
+  const results = [];
+
+  for (const plannedCommand of planned) {
+    const execution = await runner(plannedCommand.command, plannedCommand.args, plannedCommand.view, plannedCommand);
+    results.push({
+      ...plannedCommand,
+      execution,
+    });
+  }
+
+  return results;
+}
+
 export async function createGitHubBootstrapReport(config, options = {}) {
   const canonicalLabels = buildCanonicalLabelDefinitions(config, options);
   const labelInspection = inspectCanonicalLabels(canonicalLabels, options.existingLabels || []);
@@ -951,6 +1024,13 @@ export async function createGitHubBootstrapReport(config, options = {}) {
   const projectFieldUpdateCommands = hasProjectFieldInspection
     ? planProjectFieldUpdateCommands(projectFieldInspection)
     : [];
+  const projectViewCreateCommands = hasProjectViewInspection
+    ? planProjectViewCreateCommands(projectViewInspection, {
+        projectNumber: options.repository?.projectNumber || config.github?.projectNumber || "",
+        owner,
+        ownerType: options.repository?.ownerType || "user",
+      })
+    : [];
   const mode = options.apply ? "apply" : "dry-run";
   const applyResults = options.apply ? await applyMissingCanonicalLabels(labelInspection, options) : [];
   const projectCreateResult = options.apply && options.createProject
@@ -967,6 +1047,14 @@ export async function createGitHubBootstrapReport(config, options = {}) {
   const projectFieldUpdateResults = options.apply && options.updateProjectFields
     ? await applyProjectFieldUpdates(projectFieldInspection, options)
     : [];
+  const projectViewCreateResults = options.apply && options.createProjectViews
+    ? await applyProjectViewCreates(projectViewInspection, {
+        ...options,
+        projectNumber: options.repository?.projectNumber || config.github?.projectNumber || "",
+        owner,
+        ownerType: options.repository?.ownerType || "user",
+      })
+    : [];
 
   return {
     mode,
@@ -981,6 +1069,7 @@ export async function createGitHubBootstrapReport(config, options = {}) {
     projectCreateResult,
     projectFieldApplyResults,
     projectFieldUpdateResults,
+    projectViewCreateResults,
     projectViewMutationCapability,
     text: renderGitHubBootstrapReport({
       mode,
@@ -1004,12 +1093,15 @@ export async function createGitHubBootstrapReport(config, options = {}) {
       createCommands,
       projectFieldCreateCommands,
       projectFieldUpdateCommands,
+      projectViewCreateCommands,
       applyResults,
       projectFieldApplyResults,
       projectFieldUpdateResults,
+      projectViewCreateResults,
       createProject: Boolean(options.createProject),
       createProjectFields: Boolean(options.createProjectFields),
       updateProjectFields: Boolean(options.updateProjectFields),
+      createProjectViews: Boolean(options.createProjectViews),
     }),
   };
 }

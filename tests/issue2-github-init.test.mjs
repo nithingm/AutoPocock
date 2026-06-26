@@ -10,6 +10,7 @@ import {
   inspectProjectViewMutationCapability,
   inspectProjectViews,
   planProjectFieldUpdateCommands,
+  planProjectViewCreateCommands,
   planProjectCreateCommand,
   renderProjectViewPlanMarkdown,
 } from "../scripts/lib/github-init.mjs";
@@ -144,7 +145,8 @@ test("project field inspection plans missing configured fields and reports Proje
   assert.match(report.text, /Project View Drift: Validation \(name expected "Validation" actual " Validation"\)/);
   assert.equal(report.projectViewInspection.find((view) => view.name === "Validation").status, "drift");
   assert.match(report.text, /## Planned Project View Changes/);
-  assert.match(report.text, /No automatic Project view changes are available through GitHub CLI\/GraphQL/);
+  assert.match(report.text, /REST Project view creation is available/);
+  assert.match(report.text, /would create exact replacement view with --create-project-views: Validation/);
 });
 
 test("apply mode creates missing Project fields only with the explicit project-field flag", async () => {
@@ -293,6 +295,69 @@ test("Project view inspection detects exact-name misses and whitespace drift", (
   assert.equal(inspection[1].drift[0].field, "name");
   assert.equal(inspection[1].drift[0].actual, " Validation");
   assert.equal(inspection[2].status, "missing");
+});
+
+test("Project view drift and missing views plan REST create commands", () => {
+  const inspection = inspectProjectViews(["Intake", "Validation", "Done"], [
+    { name: "Intake", layout: "TABLE_LAYOUT", number: 1 },
+    { name: " Validation", layout: "TABLE_LAYOUT", number: 2 },
+  ]);
+  const plans = planProjectViewCreateCommands(inspection, {
+    projectNumber: "7",
+    owner: "example",
+    ownerType: "user",
+  });
+
+  assert.deepEqual(
+    plans.map((plan) => plan.view.name),
+    ["Validation", "Done"],
+  );
+  assert.deepEqual(plans[0].args, [
+    "api",
+    "-X",
+    "POST",
+    "users/example/projectsV2/7/views",
+    "-H",
+    "Accept: application/vnd.github+json",
+    "-H",
+    "X-GitHub-Api-Version: 2026-03-10",
+    "-f",
+    "name=Validation",
+    "-f",
+    "layout=table",
+  ]);
+  assert.match(plans[0].reason, /exact replacement view/);
+});
+
+test("apply mode creates Project views only with the explicit view flag", async () => {
+  const config = makeConfig();
+  const viewCalls = [];
+  const report = await createGitHubBootstrapReport(config, {
+    apply: true,
+    createProjectViews: true,
+    existingLabels: buildCanonicalLabelDefinitions(config),
+    existingProjectViews: [
+      { name: "Intake", layout: "TABLE_LAYOUT", number: 1 },
+      { name: " Validation", layout: "TABLE_LAYOUT", number: 2 },
+    ],
+    repository: {
+      owner: "example",
+      projectNumber: "7",
+      ownerType: "user",
+    },
+    projectViewRunner: async (command, args, view, planned) => {
+      viewCalls.push({ command, args, view, planned });
+      return { code: 0, stdout: `created ${view.name}`, stderr: "" };
+    },
+  });
+
+  assert.deepEqual(
+    viewCalls.map((call) => call.view.name),
+    ["Validation"],
+  );
+  assert.equal(viewCalls[0].command, "gh");
+  assert.match(report.text, /Project View Apply Results/);
+  assert.match(report.text, /created: Validation/);
 });
 
 test("Project view mutation capability is derived from live GraphQL mutation names", () => {

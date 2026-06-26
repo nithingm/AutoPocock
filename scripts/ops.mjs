@@ -121,6 +121,7 @@ Usage:
   pnpm ops github:init -- --apply --create-project --project-title "AutoPocock"
   pnpm ops github:init -- --apply --create-project-fields
   pnpm ops github:init -- --apply --update-project-fields
+  pnpm ops github:init -- --apply --create-project-views
   pnpm ops github:export
   pnpm ops ralph -- --plan docs/agents/loop-specs/plan.json
   pnpm ops ralph -- --plan docs/agents/loop-specs/plan.json --approve-wave wave-0 --approved-by solo-operator
@@ -1768,6 +1769,7 @@ async function gitHubInit(args = []) {
   const createProject = args.includes("--create-project");
   const createProjectFields = args.includes("--create-project-fields");
   const updateProjectFields = args.includes("--update-project-fields");
+  const createProjectViews = args.includes("--create-project-views");
   const writeViewPlan = args.includes("--write-view-plan");
   const projectTitle = readOption(args, "project-title", config.github?.repo || "AutoPocock");
   const ghVersion = await commandAvailable("gh");
@@ -1778,6 +1780,7 @@ async function gitHubInit(args = []) {
   let existingProjectFields = [];
   let existingProjectViews = [];
   let graphqlMutationNames = null;
+  const projectOwnerKind = String(project.projectUrl || "").includes("/orgs/") ? "organization" : "user";
   let labelInspectionAvailable = false;
   let projectFieldInspectionAvailable = false;
   let projectViewInspectionAvailable = false;
@@ -1832,9 +1835,16 @@ async function gitHubInit(args = []) {
     throw new Error("github:init -- --update-project-fields requires a configured GitHub Project number/project ID or --project-number/--project-id.");
   }
 
+  if (createProjectViews && !apply) {
+    throw new Error("github:init -- --create-project-views requires --apply.");
+  }
+
+  if (createProjectViews && !project.projectNumber) {
+    throw new Error("github:init -- --create-project-views requires a configured GitHub Project number or --project-number.");
+  }
+
   if (ghVersion.available && auth?.available && (project.projectId || (project.projectNumber && project.owner))) {
     try {
-      const projectOwnerKind = String(project.projectUrl || "").includes("/orgs/") ? "organization" : "user";
       const fieldResult = await runCommand("gh", project.projectId
         ? [
             "api",
@@ -1869,7 +1879,6 @@ async function gitHubInit(args = []) {
 
   if (ghVersion.available && auth?.available && (project.projectId || (project.projectNumber && project.owner))) {
     try {
-      const projectOwnerKind = String(project.projectUrl || "").includes("/orgs/") ? "organization" : "user";
       const viewsResult = await runCommand("gh", project.projectId
         ? [
             "api",
@@ -1927,11 +1936,16 @@ async function gitHubInit(args = []) {
     throw new Error("github:init -- --update-project-fields could not inspect existing Project fields. Fix Project access before applying.");
   }
 
+  if (createProjectViews && !projectViewInspectionAvailable) {
+    throw new Error("github:init -- --create-project-views could not inspect existing Project views. Fix Project access before applying.");
+  }
+
   const report = await createGitHubBootstrapReport(config, {
     apply,
     createProject,
     createProjectFields,
     updateProjectFields,
+    createProjectViews,
     projectTitle,
     gh: {
       available: ghVersion.available,
@@ -1939,7 +1953,10 @@ async function gitHubInit(args = []) {
       authenticated: Boolean(auth?.available),
       authDetail: auth?.stderr ? auth.stderr.split(/\r?\n/)[0] : "",
     },
-    repository: project,
+    repository: {
+      ...project,
+      ownerType: projectOwnerKind,
+    },
     existingLabels,
     ...(projectFieldInspectionAvailable ? { existingProjectFields } : {}),
     ...(projectViewInspectionAvailable ? { existingProjectViews } : {}),
@@ -1960,6 +1977,7 @@ async function gitHubInit(args = []) {
         await unlink(inputPath).catch(() => {});
       }
     },
+    projectViewRunner: async (command, args) => runCommand(command, args),
   });
 
   process.stdout.write(report.text);
@@ -1969,8 +1987,9 @@ async function gitHubInit(args = []) {
   process.stdout.write("- Use `pnpm ops github:init -- --apply --create-project --project-title \"Name\"` only for fresh setups without a configured Project reference.\n");
   process.stdout.write("- Use `pnpm ops github:init -- --apply --create-project-fields` to create missing configured Project fields.\n");
   process.stdout.write("- Use `pnpm ops github:init -- --apply --update-project-fields` to update supported Project field drift after dry-run review.\n");
+  process.stdout.write("- Use `pnpm ops github:init -- --apply --create-project-views` to create missing recommended Project views through REST.\n");
   process.stdout.write("- Use `pnpm ops github:init -- --write-view-plan` to write an exact Prepared Human Step for Project view create/rename workarounds.\n");
-  process.stdout.write("- Create, rename, or adjust GitHub Project views manually when Project View Inspection reports missing views or drift; GitHub CLI/GraphQL do not expose ProjectV2 view mutations.\n");
+  process.stdout.write("- Rename or delete existing GitHub Project views manually when Project View Inspection reports drift after exact replacement creation; supported GitHub APIs do not expose view rename/delete.\n");
 
   if (writeViewPlan) {
     const generatedAt = nowIso();

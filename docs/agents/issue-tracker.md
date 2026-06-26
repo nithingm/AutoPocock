@@ -21,7 +21,7 @@ GitHub is the default **Operational Tracker**.
 - It reports `gh` CLI readiness, authentication status, expected labels, issue template presence, and required Project fields/views.
 - It does not create labels, issues, comments, Projects, fields, or views unless `--apply` plus the relevant explicit creation flag is provided.
 - It can create missing labels with `--apply`, create a fresh Project with `--apply --create-project` only when no Project reference is configured, and create missing configured fields with `--apply --create-project-fields`.
-- Project views are inspected through GraphQL and missing/name-drift views are reported. `pnpm ops github:init` also inspects the live GraphQL mutation schema for ProjectV2 view capability; creation and renaming remain manual while GitHub CLI/GraphQL expose no matching view mutations.
+- Project views are inspected through GraphQL and missing/name-drift views are reported. `pnpm ops github:init` also inspects the live GraphQL mutation schema for ProjectV2 view capability. Missing recommended views can be created with `--apply --create-project-views` through the REST Project views API; existing view rename/delete remains manual because the supported APIs inspected here do not expose those mutations.
 
 ## Artifact Mirroring
 
